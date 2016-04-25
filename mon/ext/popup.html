@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+  <head>
+    <title>Privacy Monitor</title>
+    <style>
+      a { color: red; cursor: pointer; }
+      a.disabled { color: gray; cursor: not-allowed; }
+    </style>
+  </head>
+  <body style="width: 450px">
+    <u>Privacy Monitor</u> (<a id="clearall">Clear All Data</a>) (<a id="refresh">Refresh</a>)<br/>
+    <hr/>
+
+    <label>Active Stream: </label><span class="streamid">None</span><br />
+    <ul>
+      <li>audience: <span class="audience"></span></li>
+    </ul>
+
+    <label>Alerts:</label><br />
+    <ul id="prompts">
+    </ul>
+
+    <label for="username">Active Account:</label> <select id="userselect" style="width: 60%" disabled><option>N/A</option></select> (<a id="newuser">add new</a>)<br />
+    <ul>
+      <li>Distribution Status: <span class="status" data-type="distribute">-</span>
+	(last <span class="datetime" data-when="last" data-type="distribute">19 min ago</span>,
+	 next <span class="datetime" data-when="next" data-type="distribute">in 2 hours</span>)
+      </li>
+      <li>Validation Status: <span class="status" data-type="validate">-</span>
+	(last <span class="datetime" data-when="last" data-type="validate">19 min ago</span>,
+	 next <span class="datetime" data-when="next" data-type="validate">in 3 days</span>)
+      </li>
+      <li>Keys: <a id="exportuser">Export as Text</a> / <a <a class="kp-regen">Regenerate</a></li>
+      <!-- <li>Manual Sharing: <a class="kp-view" data-type="encrypt">Enc Pubkey</a> / <a class="kp-view" data-type="sign">Sign Pubkey</a></li> -->
+      <li>Pub / Sub: <a class="kp-post" data-type="post-twitter">Post to Twitter</a>
+    </ul>
+
+    <br />
+
+    Message Log: (<a id="clearlog">Clear</a>)
+    <textarea id="messagelog" style="width: 100%; max-height: 300px; min-height: 250px"></textarea>
+
+    <hr/>
+
+    <label for="messageinput">Message Input:</label><br />
+    <select disabled id="contextselect"><option>Loading...</option></select><br />
+    <textarea id="messageinput" style="width: 100%; min-height: 150px;"></textarea>
+    <button id="inputsubmit">Submit message</button>    
+
+    <script src="popup.js" type="text/javascript"></script>
+  </body>
+</html>

@@ -1,0 +1,11 @@
+syntax: regexp
+^lint/jslint.js
+^mon/ext/closure-compiler/
+syntax: glob
+*~
+mon/ext/pageapi/runtime.min.js
+mon/ext/pageapi/runtime.min.js.map
+mon/ext/pageapi/runtime.js
+mon/ext/pageapi/runtime.body.js
+mon/ext/pageapi/runtime.globals.js
+mon/ext/pageapi/runtime.min.stringify.js

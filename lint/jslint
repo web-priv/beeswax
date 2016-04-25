@@ -1,0 +1,281 @@
+#!/bin/bash
+set -e
+set -o pipefail
+
+function usage () {
+    echo "
+Usage $(basename $0) [-OPT]* [SOURCE]+
+
+  Pass file SOURCE into jslint. The exit code indicates the number of
+  errors (capped). You'll need a javascript interpreter to run this.
+  SOURCE can be JavaScript text, HTML text, JSON text, or CSS text.
+
+  OPTION SYNTAX:
+    Options are given as keywords prefixed with a dash 
+    (e.g. -adsafe=true or -maxerr=50 ). The option value can be omitted,
+    in which case it defaults to 'true'. 
+
+
+  WARNING: the option values are not JSON-sanitized: JavaScript code
+           could be injected through option values.
+
+   The list of recognized options is:
+
+   adsafe     true, if ADsafe rules should be enforced
+   bitwise    true, if bitwise operators should be allowed
+   browser    true, if the standard browser globals should be predefined
+   cap        true, if upper case HTML should be allowed
+   confusion  true, if types can be used inconsistently
+   'continue' true, if the continuation statement should be tolerated
+   css        true, if CSS workarounds should be tolerated
+   debug      true, if debugger statements should be allowed
+   devel      true, if logging should be allowed (console, alert, etc.)
+   eqeq       true, if == should be allowed
+   es5        true, if ES5 syntax should be allowed
+   evil       true, if eval should be allowed
+   forin      true, if for in statements need not filter
+   fragment   true, if HTML fragments should be allowed
+   indent     the indentation factor
+   maxerr     the maximum number of errors to allow
+   maxlen     the maximum length of a source line
+   newcap     true, if constructor names capitalization is ignored
+   node       true, if Node.js globals should be predefined
+   nomen      true, if names may have dangling _
+   on         true, if HTML event handlers should be allowed
+   passfail   true, if the scan should stop on first error
+   plusplus   true, if increment/decrement should be allowed
+   properties true, if all property names must be declared with /*properties*/
+   regexp     true, if the . should be allowed in regexp literals
+   rhino      true, if the Rhino environment globals should be predefined
+   undef      true, if variables can be declared out of order
+   unparam    true, if unused parameters should be tolerated
+   safe       true, if use of some browser features should be restricted
+   sloppy     true, if the 'use strict'; pragma is optional
+   sub        true, if all forms of subscript notation are tolerated
+   vars       true, if multiple var statements per function should be allowed
+   white      true, if sloppy whitespace is tolerated
+   widget     true  if the Yahoo Widgets globals should be predefined
+   windows    true, if MS Windows-specific globals should be predefined  
+"
+}
+
+JSLINT="$(dirname "$0")/jslint.js"
+JSLINT_URL="https://raw.githubusercontent.com/douglascrockford/JSLint/master/jslint.js"
+SOURCE=()
+OPTS=()
+INTERP=
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+	--help|-h)
+	    usage
+	    exit 0
+	    ;;
+	--)
+	    shift
+	    SOURCE+=( $@ )
+	    shift $#
+	    ;;
+	-*)
+	    opt="${1#-}"
+	    shift
+	    val="${opt#*=}"
+	    if [[ "$val" == "$opt" || "$val" == "" ]]; then
+		#no '=' or nothing after '='
+		val="true"
+	    fi
+	    key="${opt%%=*}"
+	    OPTS+=( "$key" "$val" )
+	    ;;
+	*)
+	    SOURCE+=( $1 )
+	    shift
+	    ;;
+    esac
+done
+
+if [[ ${#SOURCE[@]} -lt 1 ]]; then
+    echo "Missing SOURCE argument" >&2
+    usage >&2
+    exit 1
+fi
+
+function download () {
+    local url="${1}"
+    local output="${2}"
+    
+    if which curl >/dev/null; then
+	curl "${url}" -o "${output}".tmp;
+    elif which wget >/dev/null; then
+	wget "${url}" -O "${output}".tmp;
+    else
+	echo "Sorry you need wget or curl" >&2
+	exit 1
+    fi
+
+    mv "${output}".tmp "${output}"
+}
+
+function check_jsinterp () {
+# check that we have a JS interpreter
+    if which node > /dev/null; then
+	INTERP=node
+    elif which rhino > /dev/null; then
+	INTERP=rhino
+    else
+	echo "Sorry... You need to install rhino or node js interpreters
+   ... or alternatively, fix this script to work with something else." >&2
+	exit 1
+    fi
+}
+
+function check_jslint () {
+    if [[ ! -e "${JSLINT}" ]]; then
+	download "${JSLINT_URL}" "${JSLINT}"
+    fi
+}
+
+function run_jslint () {
+    local readonly source="${1}"
+    local readonly optstr="${2}"
+
+    if [[ "$INTERP" == node ]]; then
+	tmpscript=`mktemp`
+	(cat <<EOF
+var fs = require('fs');
+var filedata = fs.readFileSync('${JSLINT}', 'utf8');
+eval(filedata);
+var sourceText = fs.readFileSync("${source}", 'utf8');
+var ret = JSLINT(sourceText, $optstr);
+if (ret == true) process.exit(0); // no errors
+
+for (var i in JSLINT.errors) {
+  var err = JSLINT.errors[i];
+  if (err == null) {
+    //stopping error
+    console.log("_STOPPED_");
+    process.exit(0);
+  } else {
+    console.log([err.line, err.character,
+       err.reason, err.evidence,
+       err.raw,
+       err.a, err.b, err.c, err.d].join("\x1e"));
+  }
+}
+
+EOF
+	) > "$tmpscript"
+
+	node "$tmpscript" || {
+	    echo -n "\nnode command failed" >&2
+	    rm "$tmpscript" || :
+	    return 0;
+	}
+	rm "$tmpscript" || :
+	
+    elif [[ "$INTERP" == rhino ]]; then
+
+	rhino <(cat <<EOF
+
+load('${JSLINT}'); // load jslint file
+sourceText = readFile("${source}");
+var ret = JSLINT(sourceText, $optstr);
+if (ret == true) quit(0); // no errors
+
+for (var i in JSLINT.errors) {
+  var err = JSLINT.errors[i];
+  if (err == null) {
+    //stopping error
+    print("_STOPPED_");
+    quit(0);
+  } else {
+    print([err.line, err.character,
+       err.reason, err.evidence,
+       err.raw,
+       err.a, err.b, err.c, err.d].join("\x1e"));
+  }
+}
+
+EOF
+	) || {
+	    echo -n "\nrhino command failed" >&2
+	    return 0
+	}
+    fi
+
+    # exit success marker
+    echo "_DONE_"
+}
+
+
+function do_lint () {
+    local readonly source="${1}"
+    local readonly optstr="${2}"
+
+    while IFS=$'\x1e' read -a ERR; do
+	local line="${ERR[0]}"
+	local character="${ERR[1]}"
+	local reason="${ERR[2]}"
+	local evidence="${ERR[3]}"
+	
+	if [[ "$line" == "_DONE_" ]]; then
+	    # completion marker
+	    continue
+	fi
+
+	if [[ "$line" == "_STOPPED_" ]]; then
+	    # stopping error
+	    continue
+	fi
+
+	(
+	    echo "$source line $line, character $character: $reason"
+	    # TODO sed -n -e <start,end>p ${source}
+	    echo "  $evidence"
+            echo "" 
+	) >&2
+	let errors++ || :
+
+    done < <(run_jslint "$source" "$optstr")
+
+    if [[ "$line" != "_DONE_" ]]; then
+	echo "Failed to run jslint tool!" >&2
+	let fatalerrors++ || :
+    fi
+    
+    return 0
+}
+
+check_jsinterp
+check_jslint
+
+# FORM JSON OPT STRING
+optstring="({"
+for ((i=0; i< ${#OPTS[@]}; i+=2)); do
+    [[ i -gt 0 ]] && optstring+=",";
+    optstring+="${OPTS[i]}:${OPTS[i+1]}"
+done
+optstring+="})"
+
+fatalerrors=0
+errors=0
+for src in "${SOURCE[@]}"; do
+    if [[ ! -e "$src" ]]; then
+	let fatalerrors++ || :
+	echo "Source file '$src' does not exist." >&2
+	continue
+    fi
+    do_lint "$src" "$optstring"
+done
+
+if [[ ${fatalerrors} -gt 0 ]]; then
+    echo "jslint could not be run on some source files." >&2
+    [[ $(( ${fatalerrors} % 256 )) == 0 ]] && exit 1;
+    exit ${fatalerrors}
+fi
+
+if [[ ${errors} -gt 0 ]]; then	
+    echo "Found $errors problem(s)" >&2
+    [[ $(( ${errors} % 256 )) == 0 ]] && exit 1;
+    exit ${errors}
+fi

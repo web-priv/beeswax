@@ -1,0 +1,217 @@
+/**
+    Beeswax - Anti-Exfiltration Web Platform
+    Copyright (C) 2016  Jean-Sebastien Legare
+
+    Beeswax is free software: you can redistribute it and/or modify it
+    under the terms of the GNU Lesser General Public License as
+    published by the Free Software Foundation, either version 3 of the
+    License, or (at your option) any later version.
+
+    Beeswax is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
+
+    You should have received a copy of the GNU Lesser General Public
+    License along with Beeswax.  If not, see
+    <http://www.gnu.org/licenses/>.
+**/
+
+
+/*global
+  Element, Event, EventTarget, Window
+*/
+/*jshint: es5: true */
+
+(function () {
+    "use strict";
+    /* Returns a function that is directly apply()able.
+       if you'd normally do:
+       x.apply(obj, [args]);
+
+       then, to achieve the same result you can do:
+       functionWrap(x)(obj, [args]);
+    */
+    function functionWrap(f) {
+        return f.apply.bind(f);
+    }
+
+    var GOPD = Object.getOwnPropertyDescriptor.bind(Object);
+
+    /**
+       // e.g. div has a getter for 'innerHtml' in its prototype chain
+       f = getterWrap(Element.prototype, "innerHtml")
+
+       var html = f(div);
+    */
+    function getterWrap(proto, propName) {
+        var desc = GOPD(proto, propName);
+        if (!desc.get) {
+            console.error("No getter for", proto, "property:", propName);
+            desc = null;
+            return function (o) {
+                return GOPD(o, propName).value;
+            };
+        } else {
+            return desc.get.apply.bind(desc.get);
+        }
+    }
+
+    
+    function _consoleWrap(con, old) {
+        var slic = functionWrap(Array.prototype.slice);
+        var concat = functionWrap(Array.prototype.concat);
+        old = functionWrap(old);
+        return function () {
+            var args = slic(arguments);
+            return old(con, concat(["%c[BEESWAX RT]", "color: #0066FF"], [args]));
+        };
+    }
+
+    function getEventDescriptors(protos, db) {
+        var proto, i;
+        var res = db || {"Object": null};
+        var byPropertyName = {};
+
+        function _pullGetters(proto /*, db */) {
+            var names = Object.getOwnPropertyNames(proto);
+            var i, name, desc;
+            var descs = {};
+            for (i = 0; i < names.length; i++) {
+                name = names[i];
+                desc = GOPD(proto, name);
+                if (desc.get !== undefined) {
+                    // if (db.hasOwnProperty(name)) {
+                    //     console.warn("Proto", proto.constructor.name, "clashes with proto", db[name],
+                    //                  "for property", name);
+                    // }
+                    // db[name] = proto.constructor.name;
+                    descs[name] = getterWrap(proto, name);
+                    
+                }
+            }
+            return descs;
+        }
+
+        function _getHierarchy(proto, db) {
+            if (db.hasOwnProperty(proto.constructor.name)) {
+                return db[proto.constructor.name];
+            }
+            //recurse
+            var parent = _getHierarchy(Object.getPrototypeOf(proto), db);
+            db[proto.constructor.name] = {
+                parent: parent,
+                getters: _pullGetters(proto, byPropertyName)
+            };
+            return db[proto.constructor.name];
+        }
+            
+        for (i = 0; i < protos.length; i++) {
+            proto = protos[i];
+            _getHierarchy(protos[i], res);
+        }
+        return res;
+    }
+
+    /*
+      Safety Note:
+
+      Functions are wrapped with functionWrap so that we can
+      safely invoke them without using the '.' field accessor
+      operator on objects that we do not control. E.g. doing
+      x.y(z1, z2) is unsafe because a getter for the property 'y'
+      could be configured on x.
+
+      Instead we can safely do:
+
+      f = functionWrap(x.y);
+      ...
+
+      // and later on when we need to call, say, x.y(z1, z2)
+      // we do:
+
+      f(x, [z1, z2]);
+    */
+
+    var G = {
+        window: window,
+        Window_prototype: Window.prototype,
+        document: window.document,
+        setTimeout: setTimeout.bind(window),
+        documentElement: document.documentElement,
+        document_getElementById: document.getElementById.bind(document),
+        document_createEvent: document.createEvent.bind(document),
+        document_createElement: document.createElement.bind(document),
+        Document_prototype: window.Document.prototype,
+        document_querySelector: document.querySelector.bind(document),
+        document_querySelectorAll: document.querySelectorAll.bind(document),
+        EventTarget_addEventListener: functionWrap(EventTarget.prototype.addEventListener),
+        EventTarget_dispatchEvent: functionWrap(EventTarget.prototype.dispatchEvent),
+        EventTarget_prototype: EventTarget.prototype,
+        JSON_parse: JSON.parse.bind(JSON),
+        JSON_stringify: JSON.stringify.bind(JSON),
+        Event_initEvent: functionWrap(Event.prototype.initEvent),
+        console_log:   _consoleWrap(console, console.log),
+        console_error: _consoleWrap(console, console.error),
+        console_debug: _consoleWrap(console, console.debug),
+        console_warn:  _consoleWrap(console, console.warn),
+        Error: window.Error,
+        Object_create: Object.create.bind(Object),
+        Object_defineProperty: Object.defineProperty.bind(Object),
+        Object_getOwnPropertyNames: Object.getOwnPropertyNames.bind(Object),
+        Object_getPrototypeOf: Object.getPrototypeOf.bind(Object),
+        Object_getOwnPropertyDescriptor: Object.getOwnPropertyDescriptor.bind(Object),
+        Object_hasOwnProperty: functionWrap(Object.prototype.hasOwnProperty),
+        Object_freeze: Object.freeze.bind(Object),
+        Object_prototype: Object.prototype,
+        Object_toString: Object.prototype.toString,
+        Object_toLocaleString: Object.prototype.toLocaleString,
+        Object_valueOf: Object.prototype.valueOf,
+        Element_setAttribute: functionWrap(Element.prototype.setAttribute),
+        Element_getAttribute: functionWrap(Element.prototype.getAttribute),
+        Element_removeAttribute: functionWrap(Element.prototype.removeAttribute),
+        Element_prototype: window.Element.prototype,
+        Element_prototype_shadowRoot: getterWrap(window.Element.prototype, "shadowRoot"),
+        Element_prototype_createShadowRoot: functionWrap(window.Element.prototype.createShadowRoot),
+        String_toLowerCase: functionWrap(String.prototype.toLowerCase),
+        String_substr: functionWrap(String.prototype.substr),
+        String_indexOf: functionWrap(String.prototype.indexOf),
+        Array: window.Array,
+        Array_forEach: functionWrap(Array.prototype.forEach),
+        Array_slice: functionWrap(Array.prototype.slice),
+        Array_push: functionWrap(Array.prototype.push),
+        Event_prototype_stopPropagation: functionWrap(Event.prototype.stopPropagation),
+        Event_prototype_stopImmediatePropagation: functionWrap(Event.prototype.stopImmediatePropagation),
+        Event_prototype_type: getterWrap(window.Event.prototype, "type"),
+        Event_prototype_target: getterWrap(window.Event.prototype, "target"),
+        performance_now: (window.performance && window.performance.now) ? window.performance.now.bind(window.performance) : function () { return 0; },
+        Node: window.Node,
+        Node_prototype: window.Node.prototype,
+        Node_prototype_childNodes: getterWrap(window.Node.prototype, "childNodes"),
+        Node_prototype_parentNode: getterWrap(window.Node.prototype, "parentNode"),
+        Node_prototype_appendChild: functionWrap(Node.prototype.appendChild),
+        Node_prototype_replaceChild: functionWrap(Node.prototype.replaceChild),
+        Node_prototype_removeChild: functionWrap(Node.prototype.removeChild),
+        NodeList: window.NodeList,
+        NodeList_item: functionWrap(window.NodeList.prototype.item),
+        HTMLShadowElement: window.HTMLShadowElement
+    };
+    function addAllEventProtos(G) {
+        var names = G.Object_getOwnPropertyNames(window);
+        var i, name, eventProto;
+        var descriptors = {"Object": null};
+        for (i = 0; i < names.length; i++) {
+            name = names[i];
+            if (name.substr(name.length - 5) === "Event") {
+                eventProto = window[name].prototype;
+                G[name] = window[name];
+                G[name + "_prototype"] = eventProto;
+                getEventDescriptors([eventProto], descriptors);
+            }
+        }
+        G.Event_descriptors = descriptors;
+    }
+    addAllEventProtos(G);
+
+    return G;
+})()

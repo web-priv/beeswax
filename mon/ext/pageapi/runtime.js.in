@@ -1,0 +1,12 @@
+/**
+ *
+ * Micasa In-Page Runtime
+ *
+ **/
+
+(
+#include "runtime.body.js"
+)
+(
+#include "runtime.globals.js"
+);

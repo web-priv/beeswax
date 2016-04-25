@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Crypto Library Tests</title>
+  <link rel="stylesheet" href="css/qunit-1.15.0.css">
+</head>
+<body>
+  <div id="private-test-zone">
+  </div>
+
+  <div id="qunit"></div>
+  <div id="qunit-fixture"></div>
+  <script src="libs/require.js" data-main="main.js" async></script>
+
+  <!-- The elements listed here are not shown until the tests that need them run.
+       Stuff under templates is cloned and then inserted wherever needed. -->
+  <div id="templates" style="display: none">
+    <div data-template="test-inputarea">
+      <div>
+	<span>Type text in this area to complete the test.</span>
+	<div class="private">
+	  <textarea type="text" data-name="input1"></textarea>
+	</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,44 @@
+{
+  "name": "Beeswax Privacy Monitor",
+  "version": "0.1",
+  "manifest_version": 2,
+
+  "description": "Beeswax Privacy Monitor",
+
+  "icons" : {
+    "16": "logo/logo16.png",
+    "32": "logo/logo32.png",
+    "48": "logo/logo48.png",
+    "128": "logo/logo128.png"
+  },
+
+  "browser_action": {
+    "default_icon": {
+      "19": "logo/logo19.png",
+      "38": "logo/logo38.png"
+    },
+    "default_title": "Beeswax External Monitor",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "scripts": ["jquery-1.11.3.min.js",
+		"sjcl.js",
+		"utils.js",
+		"vault.js",
+		"keyclasses.js",
+		"ui.js",
+		"background.js"
+		]
+  },
+  "content_scripts": [{"matches":["<all_urls>"], "js": ["utils.js", "contentscript.js"],
+                       "run_at": "document_start",
+		       "all_frames": true
+		       }],
+  "web_accessible_resources": [
+    "pageapi/runtime.min.js",
+    "pageapi/runtime.js"
+  ],
+  "permissions": ["webRequest", "webRequestBlocking",
+                  "tabs", "storage", "https://twitter.com/",
+                  "<all_urls>"]
+}
