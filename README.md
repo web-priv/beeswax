@@ -4,6 +4,7 @@ BEESWAX
 A platform for protecting private data from exfiltration in web
 applications.  The prototype ships as a Chrome extension.
 
+
 Development
 -----------
 
@@ -19,6 +20,9 @@ The extension code requires compilation. There are several files that are prepro
 
 Installation
 ------------
+
+Until the extension is distributed as a single file, it needs to be installed as a developer extension.
+A few files must be compiled before the extension can be installed properly. Follow steps in [Development](#development) section to know how to generate them.
 
 It needs to be installed as a developer extension.
 
