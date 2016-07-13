@@ -1279,7 +1279,7 @@ CryptoCtx.prototype = {
             });
     },
 
-    encryptMessage: function (keyObj, message) {
+    encryptMessage: function (keyObj, plaintext) {
         "use strict";
         var that = this;
         //TODO: ENCRYPT WITH PUBLIC KEY OF EACH USER IN KEYOBJ
@@ -1293,7 +1293,7 @@ CryptoCtx.prototype = {
             return Promise.reject(new Error("account name does not exist: " + principals[i]));
           }
           var pubKey = ident.toPubKey();
-          result.push(pubKey.encryptMessage(message));
+          result.push(pubKey.encryptMessage(plaintext));
           return result;
         }
     },
@@ -1307,8 +1307,8 @@ CryptoCtx.prototype = {
             return new Fail(Fail.NOKEYRING, "Keyring not open.");
         }
         var ident = Vault.getAccount(that.kr.username);
-        var msg = ident.decryptMessage(ct);
-        return msg;
+
+        return Promise.resolve(ident.decryptMessage(ct));
 
     }
 };
@@ -2671,9 +2671,9 @@ var handlers = {
 
     encrypt_elGamal: function (ctx, rpc) {
         "use strict";
-        rpc.params = assertType(rpc.params, {keyhandle: OneOf(KH_TYPE, ""), message: ""});
+        rpc.params = assertType(rpc.params, {keyhandle: KH_TYPE});
 
-        var ret = ctx.encryptMessage(KeyCache.get(rpc.params.keyhandle.keyid), rpc.params.message);
+        var ret = ctx.encryptMessage(KeyCache.get(rpc.params.keyhandle.keyid), rpc.params.plaintext);
         ctx.port.postMessage({callid: rpc.callid, result: ret});/*.then(function (res) {
             return res;
         }).catch(function (err) {
@@ -2682,11 +2682,12 @@ var handlers = {
         });*/
     },
 
-    decrypt_elGamal: function (ctx, rpc) {
+    darken_elGamal: function (ctx, rpc) {
         "use strict";
-        rpc.params = assertType(rpc.params, {message: ""});
-        var ret = ctx.decryptMessage(rpc.params.message);
-        ctx.port.postMessage({callid: rpc.callid, result: ret});
+        console.log("entered darken_elgamal background");
+        rpc.params = assertType(rpc.params, {keyhandle: OneOf(KH_TYPE, ""), ciphertext: ""});
+        var pt = ctx.decryptMessage(rpc.params.ciphertext);
+        return pt;
     }
 };
 

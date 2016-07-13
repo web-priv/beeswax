@@ -432,7 +432,6 @@
             }
 
             // Translate callids. Page callid -> CS callid
-            console.log("serializing");
             var serial = csCallIDSerial++;
             csCallIDs[serial] = {fromPage: true, callid: msg.callid, cmd: msg.cmd, params: msg.params};
             msg.callid = serial;
@@ -692,7 +691,7 @@
             function privateInputHooks(root, keyid) {
                 function keyboardHandler(evt) {
                     if (evt.target && isPrivateElt(evt.target)) {
-                        // update private indicator
+                        // update private indicator 
                            bgCryptoRPC({cmd: "update_priv_ind", params: {type: "keyboard", keyid: keyid, val: true}}).then(function (/* result */) {
                               console.debug("Enabled Keyboard indicator.");
                            }).catch(function (err) {
@@ -792,7 +791,7 @@
             params.keyhandle = keyhandle;
 
             opts.cmd = "encrypt_elGamal";
-            opts.params = {keyhandle: params.keyhandle, message: params.plaintext};
+            opts.params = {keyhandle: params.keyhandle, plaintext: params.plaintext};
             return opts;
         },
 
@@ -814,6 +813,23 @@
             params.keyhandle = keyhandle;
 
             opts.cmd = "encrypt_aes";
+
+            return opts;
+        },
+
+        darken_elGamal: function(opts) {
+           var params = opts.params;
+            console.log("Entered darken_elgamal forehandler");
+
+            //obviously we can't darken into something that's not a private area
+            if (!pareas[params.parent]) {
+                //TODO do something intelligent
+                throw new Fail(Fail.INVALIDPAREA, "parent provided not found");
+            }
+
+            var keyhandle = pareas[params.parent].keyhandle;
+
+            params.keyhandle = keyhandle;
 
             return opts;
         },
@@ -885,9 +901,9 @@
 
     //handlers that come after background call
     var sdom_backhandlers = {
-        darken: function (opts) {
+        darken_elGamal: function (opts) {
             var params = opts.params;
-
+             
             // if the parea doesn't exist, complain
             if (!pareas[params.parent]) {
                 //TODO do something intelligent
@@ -895,7 +911,22 @@
             }
 
             var parea = pareas[params.parent].area;
+            console.log("darkening the area");
+            parea.setContent(opts.result);
 
+            return {callid: opts.callid, result: true};
+        },
+
+        darken: function (opts) {
+            var params = opts.params;
+             
+            // if the parea doesn't exist, complain
+            if (!pareas[params.parent]) {
+                //TODO do something intelligent
+                return {callid: opts.callid, error: Fail.toRPC({code: Fail.INVALIDPAREA, message: "parent provided not found"})};
+            }
+
+            var parea = pareas[params.parent].area;
             parea.setContent(opts.result);
 
             return {callid: opts.callid, result: true};

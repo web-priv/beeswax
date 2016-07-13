@@ -1195,13 +1195,7 @@ function (G) {
             return monitor.send("post_keys", {params: {username: username}});
         },
 
-        encrypt_elGamal: function (username, message) {
-            return monitor.send("encrypt_elGamal", {params: {username: username, message: message}});
-        },
 
-        decrypt_elGamal: function (message) {
-            return monitor.send("decrypt_elGamal", {params: {message: message}});
-        },
 
         /**
            on: add an application handler for extension events
@@ -1369,6 +1363,15 @@ function (G) {
             return monitor.send("darken", {params: {parent: num, ciphertext: ciphertext}});
         },
 
+        //like darken but decrypts with elGamal
+        darken_elGamal: function (hostElt, ciphertext) {
+            if (!runtime.isPrivateHost(hostElt)) {
+                throw new E(E.INVALIDPAREA, "not a private host");
+            }
+            var num = G.Object_getOwnPropertyDescriptor(hostElt, "micasa_private_host").value;
+            return monitor.send("darken_elGamal", {params: {parent: num, ciphertext: ciphertext}});
+        },
+
         // Extract the plaintext from the private area element hostElt
         // Promises ciphertext
         //
@@ -1382,7 +1385,7 @@ function (G) {
         },
 
     
-        //Like lighten, but promises an array of ciphertext
+        //Like lighten, but promises an array of ciphertext encrypted using elGamal
         lighten_multiple: function (hostElt) {
             if (!runtime.isPrivateHost(hostElt)) {
                 throw new E(E.INVALIDPAREA, "not a private host");
