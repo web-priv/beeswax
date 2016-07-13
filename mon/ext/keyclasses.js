@@ -546,6 +546,15 @@ ECCPubKey.prototype = {
         return ret;
     },
 
+    encryptMessage: function (message) {
+        "use strict";
+        var pKem = this.encrypt.pub.kem();
+        // stringified json
+        var ct = sjcl.json.encrypt(pKem.key, btoa(message));
+        var ret = sjcl.codec.hex.fromBits(pKem.tag) + ":" + btoa(ct);
+        return ret;
+    },
+
     equalTo: function (other) {
         if (!other) {
             return false;
@@ -684,6 +693,15 @@ _extends(ECCKeyPair, ECCPubKey, {
         return new AESKey(b64Key);
     },
 
+    decryptMessage: function (keyCipher) {
+       "use strict";
+        var first = keyCipher.indexOf(":");
+        var hexTag = keyCipher.substr(0, first);
+        var ct = atob(keyCipher.substr(first + 1)); 
+        var sKem = this.encrypt.sec.unkem(sjcl.codec.hex.toBits(hexTag));
+        return atob(sjcl.decrypt(sKem, ct));
+    },
+
     signText: function (message) {
         "use strict";
         var hashMsg = sjcl.hash.sha256.hash(message);
@@ -717,6 +735,47 @@ ECCKeyPair.fromStore = function (obj) {
 };
 
 KeyLoader.registerClass("ecckp", ECCKeyPair);
+
+function AnonKey(key) {
+
+    if (!key) {
+    this.principals = [];
+    this.keyid = null;
+    }
+    else {
+        this.principals = key.principals;
+        this.keyid = key.keyid;
+    }
+}
+
+AnonKey.prototype.toStore = function (keyid) {
+        "use strict";
+
+        return {
+            typ: "anon",
+            principals: this.principals,
+            keyid: keyid
+        };
+    };
+
+AnonKey.fromStore = function (obj) {
+    "use strict";
+    
+    if (obj.typ !== "anon") {
+        return null;
+    }
+
+    var key = new AnonKey(obj.key);
+    if (obj.principals) {
+        key.principals = obj.principals;
+    }
+    if (obj.keyid) {
+        key.keyid = obj.keyid;
+    }
+    return key;
+};
+
+KeyLoader.registerClass("anon", AnonKey);
 
 function Friendship(opts) {
     "use strict";

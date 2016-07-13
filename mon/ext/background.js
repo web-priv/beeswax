@@ -785,6 +785,7 @@ CryptoCtx.prototype = {
             var encodedUser = encodeURIComponent(that.kr.username);
             var message = encodedUser + ":" + randomHex + ":" + extra;
             var signature = account.signText(message);
+            if (!extra) resolve(encodedUser + ":" + "anon" + ":" + randomHex + ":" + signature);
             resolve(encodedUser + ":" + randomHex + ":" + signature);
         });
     },
@@ -931,6 +932,16 @@ CryptoCtx.prototype = {
                 return keyhandle.keyid;
             });
         });
+    },
+
+    newAnonStream: function () {
+       "use strict";
+       var keyObj = new AnonKey();
+       var that = this;
+
+       return that.genKeyid().then(function (keyid) {
+         return keyid;
+       });
     },
 
     // CryptoCtx.prototype.invite
@@ -1226,6 +1237,79 @@ CryptoCtx.prototype = {
                 reject(new Fail(Fail.BADTYPE, "unknown message"));
             }
         });
+    },
+
+    postKeys: function (message) {
+        "use strict";
+        var that = this;       
+
+            var prompt = UI.prompt(that, that.promptId++,
+                                   "Beeswax will post public keys to twitter account " + "'@" + message + "'\n Do you wish to continue?",
+                                   [UI.Prompt.ACCEPT, UI.Prompt.REFUSE]);
+            return prompt.getPromise().then(function (triggered) {
+                if (triggered !== UI.Prompt.ACCEPT) {
+                    throw new Fail(Fail.REFUSED, "Posting Keys not accepted: " + triggered);
+                } else {
+                    // Accepted
+                    that.openKeyring(message).then(function () {
+                      console.log("opened keyring " + message);
+                      return API.postKeys(that.kr.username).catch(function (err) {
+                        UI.log("error reposting(" + err.code + "): " + err);
+                        throw err; // throw again
+                      }).then(function () {
+                        UI.log("Key for @" + that.kr.username + " posted.");
+                      });       
+                    })["catch"](function (err) {
+                      console.error("failed to open keyring " + message, err);
+                      if (err.code === "NOKEYRING") {
+                        return that.newKeyring(message).then(function () {
+                          console.log("new keyring created");
+                          return API.postKeys(that.kr.username).catch(function (err) {
+                            UI.log("error reposting(" + err.code + "): " + err);
+                            throw err; // throw again
+                          }).then(function () {
+                            UI.log("Key for @" + that.kr.username + " reposted.");
+                          });
+                        });
+                      } else {
+                        throw err;
+                        }
+                    });
+                }
+            });
+    },
+
+    encryptMessage: function (keyObj, message) {
+        "use strict";
+        var that = this;
+        //TODO: ENCRYPT WITH PUBLIC KEY OF EACH USER IN KEYOBJ
+      
+        var result = [];
+        var principals = keyObj.principals;
+
+        for (var i=0; i<principals.length; i++){
+          var ident = Vault.getAccount(principals[i]);
+          if (!ident) {
+            return Promise.reject(new Error("account name does not exist: " + principals[i]));
+          }
+          var pubKey = ident.toPubKey();
+          result.push(pubKey.encryptMessage(message));
+          return result;
+        }
+    },
+
+    decryptMessage: function (ct) {
+        "use strict";
+
+        var that = this;
+
+        if (that.kr === null) {
+            return new Fail(Fail.NOKEYRING, "Keyring not open.");
+        }
+        var ident = Vault.getAccount(that.kr.username);
+        var msg = ident.decryptMessage(ct);
+        return msg;
+
     }
 };
 
@@ -2285,11 +2369,19 @@ var handlers = {
     update_priv_ind: function (ctx, rpc) {
         "use strict";
 
+        if (rpc.params.keyid) {
         rpc.params = assertType(rpc.params, {
             type: "",
             keyid: "",
-            val: true
+            val: true,
         }, "params");
+        } else {
+        rpc.params = assertType(rpc.params, {
+            type: "",
+            keyObj: {},
+            val: true,
+        }, "params");
+        }
 
         var protTypes = {
             'keyboard':    'protectKeyboard',
@@ -2298,18 +2390,30 @@ var handlers = {
         };
 
         var method = protTypes[rpc.params.type];
-        var keyid = rpc.params.keyid;
-
+        var keyid = rpc.params.keyid || rpc.params.keyObj.keyid;
+        console.log("running");
         if (method) {
-            ctx.loadKey(keyid, AESKey).then(function (streamKey) {
-                // update the privacy indicator
-                return UI[method](rpc.params.val, streamKey);
-            }).then(function () {
-                ctx.port.postMessage({callid: rpc.callid, result: true});
-            }).catch(function (err) {
-                console.error(err);
-                ctx.port.postMessage({callid: rpc.callid, error: Fail.toRPC(err)});
-            });
+            if (rpc.params.keyObj) {
+                console.log("running now");
+                KeyCache.set(keyid, rpc.params.keyObj);
+               var streamKey = KeyLoader.fromStore(rpc.params.keyObj);
+               return UI[method](rpc.params.val, streamKey).then(function () {
+                 ctx.port.postMessage({callid: rpc.callid, result: true});
+               }).catch(function (err) {
+                 console.error(err);
+                 ctx.port.postMessage({callid: rpc.callid, error: Fail.toRPC(err)});
+               });
+            } else {
+              ctx.loadKey(keyid, AESKey).then(function (streamKey) {
+                  // update the privacy indicator
+                  return UI[method](rpc.params.val, streamKey);
+              }).then(function () {
+                  ctx.port.postMessage({callid: rpc.callid, result: true});
+              }).catch(function (err) {
+                  console.error(err);
+                  ctx.port.postMessage({callid: rpc.callid, error: Fail.toRPC(err)});
+              });
+            }
         } else {
             console.error("Invalid privacy indicator message type:", rpc.params.type);
             ctx.port.postMessage({callid: rpc.callid, error: Fail.BADPARAM});
@@ -2372,6 +2476,11 @@ var handlers = {
         // create new conversation/stream key
         rpc.params = assertType(rpc.params, {});
         return ctx.newStream(rpc.params);
+    },
+
+    new_anon_stream: function(ctx, rpc) {
+        rpc.params = assertType(rpc.params, {});
+        return ctx.newAnonStream(rpc.params);
     },
 
     fetch_public: function (ctx, rpc) {
@@ -2547,6 +2656,37 @@ var handlers = {
             console.error(err);
             ctx.port.postMessage({callid: rpc.callid, error: Fail.toRPC(err)});
         });
+    },
+
+    post_keys: function (ctx, rpc) {
+        "use strict";
+        rpc.params = assertType(rpc.params, {username: ""});
+        ctx.postKeys(rpc.params.username).then(function (res) {
+            ctx.port.postMessage({callid: rpc.callid, result: res});
+        }).catch(function (err) {
+            console.error(err);
+            ctx.port.postMessage({callid: rpc.callid, error: Fail.toRPC(err)});
+        });
+    },
+
+    encrypt_elGamal: function (ctx, rpc) {
+        "use strict";
+        rpc.params = assertType(rpc.params, {keyhandle: OneOf(KH_TYPE, ""), message: ""});
+
+        var ret = ctx.encryptMessage(KeyCache.get(rpc.params.keyhandle.keyid), rpc.params.message);
+        ctx.port.postMessage({callid: rpc.callid, result: ret});/*.then(function (res) {
+            return res;
+        }).catch(function (err) {
+            console.error(err);
+            ctx.port.postMessage({callid: rpc.callid, error: Fail.toRPC(err)});
+        });*/
+    },
+
+    decrypt_elGamal: function (ctx, rpc) {
+        "use strict";
+        rpc.params = assertType(rpc.params, {message: ""});
+        var ret = ctx.decryptMessage(rpc.params.message);
+        ctx.port.postMessage({callid: rpc.callid, result: ret});
     }
 };
 

@@ -244,6 +244,48 @@
         }
     });
 
+    function SelectArea(hostEl, select) {
+        PArea.apply(this, arguments);
+        this.el.addEventListener("change", this.onChange.bind(this), true);
+    }
+    _extends(SelectArea, PArea, {
+         setContent: function(plain) {
+            this.el.value = plain;
+         },
+
+         getContent: function() {
+             //return this.el.value;
+             return getSelected();
+         },
+
+         render: function() {
+            return this.el;
+         },
+
+         onChange: function (evt) {
+            if (evt) {
+                evt.preventDefault();
+            }
+
+            var selected = this.getSelected();           
+            var keyid = this.keyid;
+            console.log("hi 5" + keyid);
+            bgCryptoRPC({cmd: "update_priv_ind", params: {type: "mouse", keyObj: {typ: "anon", principals: selected, keyid: keyid}, val:true}}).then(function (/* result */) {
+                console.debug("Triggered select choice.");
+            }).catch(function (err) {
+                console.error("Failed to update private indicator for select area event.", err);
+            });
+
+
+
+         },
+
+         getSelected: function() {
+            var result = [];
+             for (var i=0; i<this.el.options.length; i++) if(this.el.options[i].selected) result.push(this.el.options[i].value || this.el.options[i].text);
+             return result;
+         }
+    });
 
     function ImageArea(hostEl, img) {
         var div = document.createElement("div");
@@ -390,6 +432,7 @@
             }
 
             // Translate callids. Page callid -> CS callid
+            console.log("serializing");
             var serial = csCallIDSerial++;
             csCallIDs[serial] = {fromPage: true, callid: msg.callid, cmd: msg.cmd, params: msg.params};
             msg.callid = serial;
@@ -553,6 +596,9 @@
     function createPrivateSubtree(hostElt, elt) {
         if (elt.tagName === "IMG") {
             return new ImageArea(hostElt, elt.cloneNode(false));
+        } else if (elt.tagName === "SELECT") {
+            return new SelectArea(hostElt, elt.cloneNode(true));
+
         } else {
             return new EltArea(hostElt, elt.cloneNode());
         }
@@ -642,15 +688,16 @@
             var domQuery = "[data-micasa-lookup='" + areaNumber + "']";
             var shost = document.querySelector(domQuery);
 
+
             function privateInputHooks(root, keyid) {
                 function keyboardHandler(evt) {
                     if (evt.target && isPrivateElt(evt.target)) {
                         // update private indicator
-                        bgCryptoRPC({cmd: "update_priv_ind", params: {type: "keyboard", keyid: keyid, val: true}}).then(function (/* result */) {
-                            console.debug("Enabled Keyboard indicator.");
-                        }).catch(function (err) {
-                            console.error("Failed to update private indicator for keyboard event.", err);
-                        });
+                           bgCryptoRPC({cmd: "update_priv_ind", params: {type: "keyboard", keyid: keyid, val: true}}).then(function (/* result */) {
+                              console.debug("Enabled Keyboard indicator.");
+                           }).catch(function (err) {
+                              console.error("Failed to update private indicator for keyboard event.", err);
+                           });
                     } else {
                         console.error("Received keyboard event on shadow root for a non private element!");
                         bgCryptoRPC({cmd: "_maim", params: {}}).catch(function (err) {
@@ -662,11 +709,11 @@
                 function mouseHandler(evt) {
                     if (evt.target && isPrivateElt(evt.target)) {
                         // update private indicator
-                        bgCryptoRPC({cmd: "update_priv_ind", params: {type: "mouse", keyid: keyid, val: true}}).then(function (/* result */) {
-                            console.debug("Enabled Mouse indicator.");
-                        }).catch(function (err) {
-                            console.error("Failed to update private indicator for mouse event.", err);
-                        });
+                         bgCryptoRPC({cmd: "update_priv_ind", params: {type: "mouse", keyid: keyid, val: true}}).then(function (/* result */) {
+                              console.debug("Enabled Mouse indicator.");
+                           }).catch(function (err) {
+                              console.error("Failed to update private indicator for mouse event.", err);
+                           });
                     } else {
                         console.error("Received mouse event on shadow root for a non private element!");
                         bgCryptoRPC({cmd: "_maim", params: {}}).catch(function (err) {
@@ -675,10 +722,14 @@
                     }
                 }
 
+
+                //if (!keyid.split(":")[1] === "anon") {
+                if (!shost.children[0].tagName === "SELECT"){
                 root.addEventListener("keyup", keyboardHandler, true);
                 root.addEventListener("keydown", keyboardHandler, true);
                 root.addEventListener("keypress", keyboardHandler, true);
                 root.addEventListener("click", mouseHandler, true);
+                }
             }
 
             // Can't find the element
@@ -701,6 +752,7 @@
             var child = shost.children[0];
             var sroot = shost.createShadowRoot();
 
+
             privateInputHooks(sroot, keyhandle.keyid);
 
             var parea = createPrivateSubtree(shost, child);
@@ -721,6 +773,29 @@
             return {cmd: "nobg", callid: opts.callid, result: true, times: opts.times};
         },
 
+        //like lighten, but returns an array of encrypted objects
+        lighten_multiple: function (opts) {
+            var params = opts.params;
+            //console.log("Entered lighten forehandler");
+
+            //obviously we can't lighten something that's not a private area
+            if (!pareas[params.parent]) {
+                //TODO do something intelligent
+                throw new Fail(Fail.INVALIDPAREA, "parent provided not found");
+            }
+
+            var parea = pareas[params.parent].area;
+
+            var keyhandle = pareas[params.parent].keyhandle;
+
+            params.plaintext = parea.getContent();
+            params.keyhandle = keyhandle;
+
+            opts.cmd = "encrypt_elGamal";
+            opts.params = {keyhandle: params.keyhandle, message: params.plaintext};
+            return opts;
+        },
+
         lighten: function (opts) {
             var params = opts.params;
             //console.log("Entered lighten forehandler");
@@ -737,6 +812,7 @@
 
             params.plaintext = parea.getContent();
             params.keyhandle = keyhandle;
+
             opts.cmd = "encrypt_aes";
 
             return opts;
