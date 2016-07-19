@@ -237,6 +237,19 @@
             } else {
                 this.el.innerText = plainText;
             }
+            /*something for twistor messages maybe 
+             this.messages = [];
+             setContent: function (data){ 
+              if (messages.length === 10) {
+                 messages.pop();
+                 messages.unshift(data);
+              } else messages.unshift(data);
+              var val = "";
+              for (var i=0; i <messages.length; i++) {
+              val= val + messages[i] + "\n";
+              }
+              text.value = val.trim();
+             }*/
         },
 
         getContent: function () {
@@ -247,6 +260,7 @@
     function SelectArea(hostEl, select) {
         PArea.apply(this, arguments);
         this.el.addEventListener("change", this.onChange.bind(this), true);
+        this.el.addEventListener("click", this.onClick.bind(this), true);
     }
     _extends(SelectArea, PArea, {
          setContent: function(plain) {
@@ -262,6 +276,13 @@
             return this.el;
          },
 
+         onClick: function (evt) {
+            if (evt) {
+                evt.preventDefault();
+            }
+
+         },
+
          onChange: function (evt) {
             if (evt) {
                 evt.preventDefault();
@@ -270,7 +291,7 @@
             var selected = this.getSelected();           
             var keyid = this.keyid;
             console.log("hi 5" + keyid);
-            bgCryptoRPC({cmd: "update_priv_ind", params: {type: "mouse", keyObj: {typ: "anon", principals: selected, keyid: keyid}, val:true}}).then(function (/* result */) {
+            bgCryptoRPC({cmd: "update_priv_ind_anon", params: {type: "change", keyObj: {typ: "anon", principals: selected, keyid: keyid}, val:true}}).then(function (/* result */) {
                 console.debug("Triggered select choice.");
             }).catch(function (err) {
                 console.error("Failed to update private indicator for select area event.", err);
@@ -667,7 +688,7 @@
 
         mark_private: function (opts) {
             try {
-                return sdom_forehandlers._mark_private(opts);
+              return sdom_forehandlers._mark_private(opts);
             } catch (err) {
                 console.error("mark_private caught error" + err + " stack: " + err.stack);
                 throw err;
@@ -692,11 +713,12 @@
                 function keyboardHandler(evt) {
                     if (evt.target && isPrivateElt(evt.target)) {
                         // update private indicator 
-                           bgCryptoRPC({cmd: "update_priv_ind", params: {type: "keyboard", keyid: keyid, val: true}}).then(function (/* result */) {
-                              console.debug("Enabled Keyboard indicator.");
-                           }).catch(function (err) {
-                              console.error("Failed to update private indicator for keyboard event.", err);
-                           });
+                        bgCryptoRPC({cmd: "update_priv_ind", params: {type: "keyboard", keyid: keyid, val: true}}).then(function (/* result */) {
+                            console.debug("Enabled Keyboard indicator.");
+                        }).catch(function (err) {
+                            console.error("Failed to update private indicator for keyboard event.", err);
+                        });
+                       
                     } else {
                         console.error("Received keyboard event on shadow root for a non private element!");
                         bgCryptoRPC({cmd: "_maim", params: {}}).catch(function (err) {
@@ -708,7 +730,7 @@
                 function mouseHandler(evt) {
                     if (evt.target && isPrivateElt(evt.target)) {
                         // update private indicator
-                         bgCryptoRPC({cmd: "update_priv_ind", params: {type: "mouse", keyid: keyid, val: true}}).then(function (/* result */) {
+                           bgCryptoRPC({cmd: "update_priv_ind", params: {type: "mouse", keyid: keyid, val: true}}).then(function (/* result */) {
                               console.debug("Enabled Mouse indicator.");
                            }).catch(function (err) {
                               console.error("Failed to update private indicator for mouse event.", err);
@@ -721,13 +743,47 @@
                     }
                 }
 
+                function keyboardHandlerAnon(evt) {
+                    if (evt.target && isPrivateElt(evt.target)) {
+                        bgCryptoRPC({cmd: "update_priv_ind_anon", params: {type: "keyboard", keyObj: {typ: "anon", principals: [], keyid: keyid}, val:true}}).then(function (/* result */) {
+                          console.debug("Enabled Keyboard indicator.");
+                        }).catch(function (err) {
+                              console.error("Failed to update private indicator for keyboard event.", err);
+                        });
+                    } else {
+                        console.error("Received keyboard event on shadow root for a non private element!");
+                        bgCryptoRPC({cmd: "_maim", params: {}}).catch(function (err) {
+                            console.error("Failed to maim context.", err);
+                        });
+                    }
+                }
 
-                //if (!keyid.split(":")[1] === "anon") {
-                if (!shost.children[0].tagName === "SELECT"){
-                root.addEventListener("keyup", keyboardHandler, true);
-                root.addEventListener("keydown", keyboardHandler, true);
-                root.addEventListener("keypress", keyboardHandler, true);
-                root.addEventListener("click", mouseHandler, true);
+                function mouseHandlerAnon(evt) {
+                   if (evt.target && isPrivateElt(evt.target)) {
+                        bgCryptoRPC({cmd: "update_priv_ind_anon", params: {type: "mouse", keyObj: {typ: "anon", principals: [], keyid: keyid}, val:true}}).then(function (/* result */) {
+                          console.debug("Enabled Mouse indicator.");
+                        }).catch(function (err) {
+                              console.error("Failed to update private indicator for mouse event.", err);
+                        });
+                    } else {
+                        console.error("Received mouse event on shadow root for a non private element!");
+                        bgCryptoRPC({cmd: "_maim", params: {}}).catch(function (err) {
+                            console.error("Failed to maim context.", err);
+                        });
+                    } 
+                }
+
+
+                if (keyid.split(":")[1] === "anon") {
+                    root.addEventListener("keyup", keyboardHandlerAnon, true);
+                    root.addEventListener("keydown", keyboardHandlerAnon, true);
+                    root.addEventListener("keypress", keyboardHandlerAnon, true);
+                    root.addEventListener("click", mouseHandlerAnon, true);
+                } else {
+                    root.addEventListener("keyup", keyboardHandler, true);
+                    root.addEventListener("keydown", keyboardHandler, true);
+                    root.addEventListener("keypress", keyboardHandler, true);
+                    root.addEventListener("click", mouseHandler, true);
                 }
             }
 
@@ -819,7 +875,6 @@
 
         darken_elGamal: function(opts) {
            var params = opts.params;
-            console.log("Entered darken_elgamal forehandler");
 
             //obviously we can't darken into something that's not a private area
             if (!pareas[params.parent]) {

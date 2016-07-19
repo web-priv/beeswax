@@ -34,6 +34,7 @@ window.UI = (function () {
     var MOUSE_TIMER_UNLOCK_MS = 4000;
     var KB_TIMER_UNLOCK_MS = 4000;
     var FILE_CHOOSER_TIMER_UNLOCK_MS = 5000;
+    var CHANGE_TIMER_UNLOCK_MS = 4000;
 
     var all_prompts = [];
     var all_warnings = {};
@@ -136,6 +137,8 @@ window.UI = (function () {
         this.mouseFlag = false;
         this.fileChooserTimer = -1;
         this.fileChooserFlag = false;
+        this.changeTimer = -1;
+        this.changeFlag = false;
         
         // messages are appended to this and displayed in the popup.
         this.logBuffer = "";
@@ -239,6 +242,10 @@ window.UI = (function () {
                 txt += "F";
             }
 
+            if (that.changeFlag) {
+                txt += "C";
+            }
+
             if (that.mouseFlag) {
                 txt += "M";
             }
@@ -271,6 +278,10 @@ window.UI = (function () {
         }
 
         if (this.mouseFlag) {
+            prot = true;
+        }
+
+        if (this.changeFlag) {
             prot = true;
         }
 
@@ -322,6 +333,33 @@ window.UI = (function () {
         
         if (that.fileChooserFlag) {
             that.fileChooserTimer = window.setTimeout(_disableFileChooser, FILE_CHOOSER_TIMER_UNLOCK_MS);
+        }
+
+        return that._updateProtected();
+    };
+
+    UI.prototype.protectChange = function (setting, keyObj) {
+        console.debug("[UI] protectChange:", setting, (keyObj === null) ? null : keyObj.keyid);
+
+        var that = this;
+        keyObj = keyObj || null;
+
+        var newSetting = (setting === undefined) ? false : !!setting;
+        
+        that._setFlag('changeFlag', newSetting, keyObj);
+
+        function _unprotectChange() {
+            that.changeTimer = -1;
+            that.protectChange(false, null);
+        }
+
+        if (that.changeTimer > -1) {
+            window.clearInterval(that.changeTimer);
+            that.changeTimer = -1;
+        }
+        
+        if (that.changeFlag) {
+            that.changeTimer = window.setTimeout(_unprotectChange, CHANGE_TIMER_UNLOCK_MS);
         }
 
         return that._updateProtected();

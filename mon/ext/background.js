@@ -2366,44 +2366,59 @@ var handlers = {
         ctx.port.postMessage({callid: rpc.callid, error: Fail.INVALID_RPC});
     },
 
+    update_priv_ind_anon: function (ctx, rpc) {
+
+      rpc.params = assertType(rpc.params, {
+            type: "",
+            keyObj: {},
+            val: true,
+        }, "params");
+
+        var protTypes = {
+            'keyboard':    'protectKeyboard',
+            'mouse':       'protectMouse',
+            'filechooser': 'chooseFile',
+            'change':      'protectChange',
+        };
+
+        var method = protTypes[rpc.params.type];
+        var keyid = rpc.params.keyObj.keyid;
+ 
+        if (method) {
+            if (rpc.params.keyObj.principals.length > 0) KeyCache.set(keyid, rpc.params.keyObj);
+            var streamKey = KeyLoader.fromStore(rpc.params.keyObj);
+            return UI[method](rpc.params.val, streamKey).then(function () {
+                ctx.port.postMessage({callid: rpc.callid, result: true});
+            }).catch(function (err) {
+                console.error(err);
+                ctx.port.postMessage({callid: rpc.callid, error: Fail.toRPC(err)});
+            });
+        } else {
+            console.error("Invalid privacy indicator message type:", rpc.params.type);
+            ctx.port.postMessage({callid: rpc.callid, error: Fail.BADPARAM});
+        }
+    },
+
     update_priv_ind: function (ctx, rpc) {
         "use strict";
 
-        if (rpc.params.keyid) {
         rpc.params = assertType(rpc.params, {
             type: "",
             keyid: "",
             val: true,
         }, "params");
-        } else {
-        rpc.params = assertType(rpc.params, {
-            type: "",
-            keyObj: {},
-            val: true,
-        }, "params");
-        }
+
 
         var protTypes = {
             'keyboard':    'protectKeyboard',
             'mouse':       'protectMouse',
-            'filechooser': 'chooseFile'
+            'filechooser': 'chooseFile',
+            'change':      'protectChange',
         };
 
         var method = protTypes[rpc.params.type];
-        var keyid = rpc.params.keyid || rpc.params.keyObj.keyid;
-        console.log("running");
+        var keyid = rpc.params.keyid;
         if (method) {
-            if (rpc.params.keyObj) {
-                console.log("running now");
-                KeyCache.set(keyid, rpc.params.keyObj);
-               var streamKey = KeyLoader.fromStore(rpc.params.keyObj);
-               return UI[method](rpc.params.val, streamKey).then(function () {
-                 ctx.port.postMessage({callid: rpc.callid, result: true});
-               }).catch(function (err) {
-                 console.error(err);
-                 ctx.port.postMessage({callid: rpc.callid, error: Fail.toRPC(err)});
-               });
-            } else {
               ctx.loadKey(keyid, AESKey).then(function (streamKey) {
                   // update the privacy indicator
                   return UI[method](rpc.params.val, streamKey);
@@ -2413,7 +2428,6 @@ var handlers = {
                   console.error(err);
                   ctx.port.postMessage({callid: rpc.callid, error: Fail.toRPC(err)});
               });
-            }
         } else {
             console.error("Invalid privacy indicator message type:", rpc.params.type);
             ctx.port.postMessage({callid: rpc.callid, error: Fail.BADPARAM});
@@ -2684,7 +2698,6 @@ var handlers = {
 
     darken_elGamal: function (ctx, rpc) {
         "use strict";
-        console.log("entered darken_elgamal background");
         rpc.params = assertType(rpc.params, {keyhandle: OneOf(KH_TYPE, ""), ciphertext: ""});
         var pt = ctx.decryptMessage(rpc.params.ciphertext);
         return pt;
