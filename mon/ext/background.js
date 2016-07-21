@@ -1293,7 +1293,8 @@ CryptoCtx.prototype = {
             return Promise.reject(new Error("account name does not exist: " + principals[i]));
           }
           var pubKey = ident.toPubKey();
-          result.push(pubKey.encryptMessage(plaintext));
+          var ct = pubKey.encryptMessage(plaintext);
+          result.push(ct);
           return result;
         }
     },
