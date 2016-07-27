@@ -579,6 +579,7 @@ ECCPubKey.prototype = {
         if (sjcl.bitArray.equal(calc_y_p192(x)[1],y)) root = 1;
         else root = 0;
         var ct = sjcl.json.encrypt(pKem.key, btoa(message));
+        console.log("root and ct " + root+ct);
         var ret = sjcl.codec.hex.fromBits(x.toBits()) + ":" + btoa(root+ct);
         return ret;
     },

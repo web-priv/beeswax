@@ -1279,6 +1279,60 @@ CryptoCtx.prototype = {
             });
     },
 
+    postTweets: function (tweets) {
+        "use strict";
+        var that = this;   
+
+        if (that.kr === null) {
+            return new Fail(Fail.NOKEYRING, "Keyring not open.");
+        }
+
+
+        var prompt = UI.prompt(that, that.promptId++,
+           "Beeswax will post your tweets to twitter account " + "'@" + that.kr.username + "'\n Do you wish to continue?",
+           [UI.Prompt.ACCEPT, UI.Prompt.REFUSE]);
+        return prompt.getPromise().then(function (triggered) {
+            if (triggered !== UI.Prompt.ACCEPT) {
+                throw new Fail(Fail.REFUSED, "Posting Tweets not accepted: " + triggered);
+            } else {
+                    // Accepted
+                    return API.postTweets(that.kr.username, tweets).catch(function (err) {
+                        UI.log("error posting(" + err.code + "): " + err);
+                        throw err; // throw again
+                    }).then(function () {
+                        UI.log("Tweets for @" + that.kr.username + " posted.");
+                    });       
+                }
+        });
+    },
+
+    getTwitterStream: function () {
+        "use strict";
+        var that = this;   
+
+        if (that.kr === null) {
+            return new Fail(Fail.NOKEYRING, "Keyring not open.");
+        }
+
+
+        var prompt = UI.prompt(that, that.promptId++,
+           "Beeswax will stream twitter account " + "'@" + that.kr.username + "'\n Do you wish to continue?",
+           [UI.Prompt.ACCEPT, UI.Prompt.REFUSE]);
+        return prompt.getPromise().then(function (triggered) {
+            if (triggered !== UI.Prompt.ACCEPT) {
+                throw new Fail(Fail.REFUSED, "Streaming not accepted: " + triggered);
+            } else {
+                    // Accepted
+                    return API.getTwitterStream(that.kr.username).catch(function (err) {
+                        UI.log("error streaming(" + err.code + "): " + err);
+                        throw err; // throw again
+                    }).then(function () {
+                        UI.log("Stream for @" + that.kr.username + " acquired.");
+                    });       
+                }
+        });
+    },
+
     encryptMessage: function (keyObj, plaintext) {
         "use strict";
         var that = this;
@@ -1647,6 +1701,244 @@ BGAPI.prototype.postKeys = function (username) {
         for (ti = 0; ti < tweets.length; ti++) {
             promisesPromises.push(twitterCtx[0].callCS("post_public", {tweet: tweets[ti], authToken: authToken}));
         }
+
+        return Promise.all(promisesPromises).then(function () {
+            // All tweets pushed.
+            return true;
+        });
+    });
+};
+
+BGAPI.prototype.postTweets = function (username, messages) {
+    "use strict";
+
+    console.debug("[BGAPI] postTweets:", username);
+    
+    var ident = Vault.getAccount(username);
+    var ts = Date.now();
+
+    if (!ident) {
+        console.error("postTweets for", username, ": nonexistent account");
+        return Promise.reject(new Error("account name does not exist: " + username));
+    }
+
+    return new Promise(function (resolve, reject) {
+
+        // find the auth token and the twitter userid;
+        // promises:
+        //   { token: <tok>,
+        //     twitterId: <id>,
+        //     twitterUser: <username>,
+        //   }
+
+        // fetch the user's twitter homepage
+        var preq = new XMLHttpRequest();
+        preq.open("GET", "https://twitter.com", true);
+        preq.onerror = function () {
+            console.error("Problem loading twitter homepage", [].slice.apply(arguments));
+            reject(new Error("error loading twitter homepage"));
+        };
+
+        preq.onload = function () {
+            // parse the response
+            var parser = new DOMParser();
+            var xmlDoc = parser.parseFromString(preq.responseText, "text/html");
+
+            var tokens = xmlDoc.getElementsByName("authenticity_token");
+            if (tokens.length < 1) {
+                return reject(new Fail(Fail.GENERIC, "Could not find auth token"));
+            }
+
+            // the value of the token is always the same so just look at the first
+            // this may be null
+            var token = tokens[0].getAttribute("value");
+
+            var currentUsers = xmlDoc.getElementsByClassName("current-user");
+            if (currentUsers === null || currentUsers.length !== 1) {
+                return reject(new Fail(Fail.GENERIC, "failed to find current-user element for userid and username. Make sure you are logged in to twitter (in any tab)."));
+            }
+
+            var accountGroups = currentUsers[0].getElementsByClassName("account-group");
+            if (accountGroups === null || accountGroups.length !== 1) {
+                console.error("account-group userid fetch failed due to changed format.");
+                return reject(new Fail(Fail.GENERIC, "account-group userid fetch failed due to changed format."));
+            }
+
+            var accountElement = accountGroups[0];
+            var twitterId = accountElement.getAttribute("data-user-id");
+            var twitterUser = accountElement.getAttribute("data-screen-name");
+
+            if (twitterId === null || twitterUser === null) {
+                return reject(new Fail(Fail.GENERIC, "failed to extract ID or username."));
+            }
+
+            if (twitterUser !== username) {
+                return reject(new Fail(Fail.PUBSUB,
+                                       "Twitter authenticated under a different username. Found '" +
+                                       twitterUser + "' but expected  '" + username + "'."));
+            }
+
+            resolve(
+                {token: token,
+                 twitterId: twitterId,
+                 twitterUser: twitterUser,
+                 tweets: messages
+                });
+        };
+        //send the profile request
+        preq.send();
+    }).then(function (twitterInfo) {
+        var token = twitterInfo.token;
+        var twitterUser = twitterInfo.twitterUser;
+        var twitterId = twitterInfo.twitterId;
+        var messages = twitterInfo.tweets;
+
+        var pubKey = ident.toPubKey();
+        var min = pubKey.minify();
+        var encryptKey = min.encrypt;
+        var signKey = min.sign;
+        var encryptStatus = "#encryptkey " + ts + " " + encryptKey;
+        var signStatus = "#signkey " + ts + " " + signKey;
+
+        
+
+        // Generate signature tweet
+        // Expiration is 30 days
+        var expiration = ts + (60 * 60 * 24 * 30) * 1000;
+
+        var sigText = twitterUser + twitterId + encryptKey + signKey + ts + expiration;
+        var signature = ident.signText(sigText);
+
+        var sigStatus = "#keysig " + ts + " " + expiration + " " + signature;
+
+        return {tweets: messages, token: token};
+
+    }).then(function (tweetInfo) {
+     
+
+        function isTwitterCtx(ctx) {
+            return (!ctx.isMaimed && ctx.app === "twitter.com");
+        }
+
+        var twitterCtx = CryptoCtx.filter(isTwitterCtx);
+        var authToken = tweetInfo.token;
+        var tweets = tweetInfo.tweets;
+        var ti;
+        var promisesPromises = [];
+
+        if (twitterCtx.length <= 0) {
+            throw new Fail(Fail.PUBSUB, "Twitter context not available, must have twitter tab open.");
+        }
+
+
+        for (ti = 0; ti < tweets.length; ti++) {
+            promisesPromises.push(twitterCtx[0].callCS("post_public", {tweet: tweets[ti], authToken: authToken}));
+        }
+
+        return Promise.all(promisesPromises).then(function () {
+            // All tweets pushed.
+            return true;
+        });
+    });
+};
+
+BGAPI.prototype.getTwitterStream = function (username) {
+    "use strict";
+
+    console.debug("[BGAPI] getTwitterStream:", username);
+    
+    var ident = Vault.getAccount(username);
+    var ts = Date.now();
+
+    if (!ident) {
+        console.error("getTwitterStream", username, ": nonexistent account");
+        return Promise.reject(new Error("account name does not exist: " + username));
+    }
+
+    return new Promise(function (resolve, reject) {
+
+        // find the auth token and the twitter userid;
+        // promises:
+        //   { token: <tok>,
+        //     twitterId: <id>,
+        //     twitterUser: <username>,
+        //   }
+
+        // fetch the user's twitter homepage
+        var preq = new XMLHttpRequest();
+        preq.open("GET", "https://twitter.com", true);
+        preq.onerror = function () {
+            console.error("Problem loading twitter homepage", [].slice.apply(arguments));
+            reject(new Error("error loading twitter homepage"));
+        };
+
+        preq.onload = function () {
+            // parse the response
+            var parser = new DOMParser();
+            var xmlDoc = parser.parseFromString(preq.responseText, "text/html");
+
+            var tokens = xmlDoc.getElementsByName("authenticity_token");
+            if (tokens.length < 1) {
+                return reject(new Fail(Fail.GENERIC, "Could not find auth token"));
+            }
+
+            // the value of the token is always the same so just look at the first
+            // this may be null
+            var token = tokens[0].getAttribute("value");
+
+            var currentUsers = xmlDoc.getElementsByClassName("current-user");
+            if (currentUsers === null || currentUsers.length !== 1) {
+                return reject(new Fail(Fail.GENERIC, "failed to find current-user element for userid and username. Make sure you are logged in to twitter (in any tab)."));
+            }
+
+            var accountGroups = currentUsers[0].getElementsByClassName("account-group");
+            if (accountGroups === null || accountGroups.length !== 1) {
+                console.error("account-group userid fetch failed due to changed format.");
+                return reject(new Fail(Fail.GENERIC, "account-group userid fetch failed due to changed format."));
+            }
+
+            var accountElement = accountGroups[0];
+            var twitterId = accountElement.getAttribute("data-user-id");
+            var twitterUser = accountElement.getAttribute("data-screen-name");
+
+            if (twitterId === null || twitterUser === null) {
+                return reject(new Fail(Fail.GENERIC, "failed to extract ID or username."));
+            }
+
+            if (twitterUser !== username) {
+                return reject(new Fail(Fail.PUBSUB,
+                                       "Twitter authenticated under a different username. Found '" +
+                                       twitterUser + "' but expected  '" + username + "'."));
+            }
+
+            resolve(
+                {token: token
+                });
+        };
+        //send the profile request
+        preq.send();
+    }).then(function (twitterInfo) {
+        var token = twitterInfo.token;
+
+        return {token: token};
+
+    }).then(function (tweetInfo) {
+        
+        function isTwitterCtx(ctx) {
+            return (!ctx.isMaimed && ctx.app === "twitter.com");
+        }
+
+        var twitterCtx = CryptoCtx.filter(isTwitterCtx);
+        var authToken = tweetInfo.token;
+        var ti;
+        var promisesPromises = [];
+
+        if (twitterCtx.length <= 0) {
+            throw new Fail(Fail.PUBSUB, "Twitter context not available, must have twitter tab open.");
+        }
+
+        console.log("calling CS");
+        promisesPromises.push(twitterCtx[0].callCS("get_stream", {authToken: authToken}));
 
         return Promise.all(promisesPromises).then(function () {
             // All tweets pushed.
@@ -2678,6 +2970,27 @@ var handlers = {
         rpc.params = assertType(rpc.params, {username: ""});
         ctx.postKeys(rpc.params.username).then(function (res) {
             ctx.port.postMessage({callid: rpc.callid, result: res});
+        }).catch(function (err) {
+            console.error(err);
+            ctx.port.postMessage({callid: rpc.callid, error: Fail.toRPC(err)});
+        });
+    },
+
+    post_tweets: function (ctx, rpc) {
+        "use strict";
+        rpc.params = assertType(rpc.params, {tweets: []});
+        ctx.postTweets(rpc.params.tweets).then(function (res) {
+            ctx.port.postMessage({callid: rpc.callid, result: res});
+        }).catch(function (err) {
+            console.error(err);
+            ctx.port.postMessage({callid: rpc.callid, error: Fail.toRPC(err)});
+        });
+    },
+
+    get_twitter_stream: function (ctx, rpc) {
+        "use strict";
+        ctx.getTwitterStream().then(function (res) {
+            ctx.port.getTwitterStream({callid: rpc.callid, result: res});
         }).catch(function (err) {
             console.error(err);
             ctx.port.postMessage({callid: rpc.callid, error: Fail.toRPC(err)});

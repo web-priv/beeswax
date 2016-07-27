@@ -934,7 +934,7 @@
                 tpost.onreadystatechange = function () {
                     if (tpost.readyState === 4) {
                         if (tpost.status >= 200 && tpost.status <= 300) {
-                            console.log("Posting tweet succeeded");
+                            console.log("Posting tweet succeeded", tpost.responseText);
                             return resolve(tpost.status);
                         } else {
                             console.error("Failed to post a tweet:", tpost.status, tpost.responseText);
@@ -949,6 +949,39 @@
                 };
 
                 tpost.send(postData);
+            });
+        },
+
+        get_stream: function (opts) {
+            return new Promise(function (resolve, reject) {
+                console.log("getting stream");
+                var token = opts.authToken;
+                var tpost = new XMLHttpRequest();
+                var user = opts.user;
+
+                var url = 'https://userstream.twitter.com/1.1/user.json';
+                tpost.open("GET", url, true);
+                tpost.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+                
+
+                tpost.onreadystatechange = function () {
+                    if (tpost.readyState === 4) {
+                        if (tpost.status >= 200 && tpost.status <= 300) {
+                            console.log("Streaming succeeded");
+                            return resolve(tpost.status);
+                        } else {
+                            console.error("Failed to stream:", tpost.status, tpost.responseText);
+                            return reject(new Fail(Fail.PUBSUB, "Failed to stream. Message: " + tpost.responseText));
+                        }
+                    }
+                };
+
+                tpost.onerror = function () {
+                    console.error("Prolem streaming.", [].slice.apply(arguments));
+                    return reject(new Fail(Fail.GENERIC, "Failed to stream."));
+                };
+
+                tpost.send();
             });
         }
     };
