@@ -463,7 +463,7 @@ function keyidShortHex(keyid) {
     "use strict";
 
     var toks = keyid.split(/:/);
-    if (toks.length !== 3) {
+    if (toks.length !== 4) {
         throw new Fail(Fail.INVALIDKEY, "wrong format");
     }
 

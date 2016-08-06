@@ -218,6 +218,7 @@ window.UI = (function () {
                 listing.push("@" + k.toLocaleLowerCase());
             }
         }
+        console.log("princ listing :", listing);
         // usernames can only contain letters number and underscores
         return listing.join(" ");
     },
@@ -470,7 +471,8 @@ window.UI = (function () {
             }
 
             var keyid = (that.keyObj === null) ? null : that.keyObj.keyid;
-            console.debug("[UI] Protection mode changed to: " + that.isProtected + " key=" + keyid);
+            var principals = (that.keyObj === null) ? null : that.keyObj.principals;
+            console.debug("[UI] Protection mode changed to: " + that.isProtected + " key=" + keyid + " principals=" + principals);
 
             if (changed) {
                 CryptoCtx.notifyAll("ui_protection_change", {isProtected: newSetting, keyid: keyid});

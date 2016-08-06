@@ -54,10 +54,10 @@
             return old.apply(this, ["%c[BEESWAX CS]", "color: green", clean].concat(args));
         };
     }
-    console.log   = _csPrefix(console.log);
+    /*console.log   = _csPrefix(console.log);
     console.error = _csPrefix(console.error);
     console.debug = _csPrefix(console.debug);
-    console.warn  = _csPrefix(console.warn);
+    console.warn  = _csPrefix(console.warn);*/
 
     console.log("init");
 
@@ -86,6 +86,10 @@
      */
 
     var pareas = {};
+
+    // Key objects not stored in the background. These keys are stored in memory
+    // and are local to the content script. They are indexed by keyid.
+    var localKeys = {};
 
     // Set up communication channels with extension's background script and app
     var CRYPTO_PAGE_TO_CS = "_beeswax_crypto_page_to_cs";
@@ -221,7 +225,7 @@
         },
 
         // Retrieves a blob containing all the plaintext in the private area
-        // Opposite of getContent().
+        // Opposite of setContent().
         getContent: function () {
             throw new Fail(Fail.GENERIC, "subclass must override getContent");
         }
@@ -263,9 +267,6 @@
         this.el.addEventListener("click", this.onClick.bind(this), true);
     }
     _extends(SelectArea, PArea, {
-         setContent: function(plain) {
-            this.el.value = plain;
-         },
 
          getContent: function() {
              //return this.el.value;
@@ -290,15 +291,14 @@
 
             var selected = this.getSelected();           
             var keyid = this.keyid;
-            console.log("hi 5" + keyid);
+            var keyObj = localKeys[keyid];
+
             bgCryptoRPC({cmd: "update_priv_ind_anon", params: {type: "change", keyObj: {typ: "anon", principals: selected, keyid: keyid}, val:true}}).then(function (/* result */) {
                 console.debug("Triggered select choice.");
+                keyObj.principals = selected;
             }).catch(function (err) {
                 console.error("Failed to update private indicator for select area event.", err);
             });
-
-
-
          },
 
          getSelected: function() {
@@ -464,6 +464,8 @@
             var cscallinfo = csCallIDs[cscallid];
             var handler = null;
 
+            console.log("WTH", JSON.stringify(resp));
+
             if (cscallid === null) {
                 // call from bg
                 if (resp.bgcallid !== undefined) {
@@ -471,14 +473,16 @@
                     // promise-based mechanism
                     handler = CSAPI[resp.cmd];
                     handler(resp.params).then(function (result) {
+                        console.log("resp", resp);
                         delete resp.error;
                         resp.result = result;
                         csPort.postMessage(resp); // send it back
                     }).catch(function (err) {
+                        console.log("err ", err);
                         delete resp.result;
                         resp.error = Fail.toRPC(err);
                         console.error("ERR:", err);
-                        csPort.postMessage(resp);
+                        /*sendMsgOut*/csPort.postMessage(resp);
                     });
                     return;
 
@@ -495,11 +499,12 @@
                     return;
                 }
             }
-                
+  
             if (cscallinfo === undefined) {
-                console.error("Already handled response for cscallid", cscallid, resp);
+                console.error("Already handled response for cscallid", cscallid, resp);                
                 return;
             }
+
             delete csCallIDs[cscallid];
 
             if (cscallinfo.fromPage) {
@@ -571,6 +576,14 @@
             return null;
         }
         return pareas[num].keyhandle.keyid;
+    }
+
+    function getParea(domElt) {
+         var num = getAreaNumber(domElt);
+         if (!num) {
+            return null;
+         }
+         return pareas[num].parea;
     }
 
     function brandPrivateHost(node, number) {
@@ -745,7 +758,8 @@
 
                 function keyboardHandlerAnon(evt) {
                     if (evt.target && isPrivateElt(evt.target)) {
-                        bgCryptoRPC({cmd: "update_priv_ind_anon", params: {type: "keyboard", keyObj: {typ: "anon", principals: [], keyid: keyid}, val:true}}).then(function (/* result */) {
+                        var anonKeyObj = localKeys[keyid];
+                        bgCryptoRPC({cmd: "update_priv_ind_anon", params: {type: "keyboard", keyObj: anonKeyObj, val:true}}).then(function (/* result */) {
                           console.debug("Enabled Keyboard indicator.");
                         }).catch(function (err) {
                               console.error("Failed to update private indicator for keyboard event.", err);
@@ -760,7 +774,8 @@
 
                 function mouseHandlerAnon(evt) {
                    if (evt.target && isPrivateElt(evt.target)) {
-                        bgCryptoRPC({cmd: "update_priv_ind_anon", params: {type: "mouse", keyObj: {typ: "anon", principals: [], keyid: keyid}, val:true}}).then(function (/* result */) {
+                        var anonKeyObj = localKeys[keyid];
+                        bgCryptoRPC({cmd: "update_priv_ind_anon", params: {type: "mouse", keyObj: anonKeyObj, val:true}}).then(function (/* result */) {
                           console.debug("Enabled Mouse indicator.");
                         }).catch(function (err) {
                               console.error("Failed to update private indicator for mouse event.", err);
@@ -774,7 +789,7 @@
                 }
 
 
-                if (keyid.split(":")[1] === "anon") {
+                if (decodeURIComponent(keyid.split(":")[0]) === "anon") {
                     root.addEventListener("keyup", keyboardHandlerAnon, true);
                     root.addEventListener("keydown", keyboardHandlerAnon, true);
                     root.addEventListener("keypress", keyboardHandlerAnon, true);
@@ -841,13 +856,18 @@
 
             var parea = pareas[params.parent].area;
 
+
             var keyhandle = pareas[params.parent].keyhandle;
 
+            if (!(parea instanceof EltArea) || !localKeys[keyhandle.keyid]) {
+                throw new Fail(Fail.INVALIDPAREA, "invalid lighten_multiple area");
+            }
+
             params.plaintext = parea.getContent();
-            params.keyhandle = keyhandle;
+            params.principals = localKeys[keyhandle.keyid].principals;
 
             opts.cmd = "encrypt_elGamal";
-            opts.params = {keyhandle: params.keyhandle, plaintext: params.plaintext};
+            opts.params = {principals: params.principals, plaintext: params.plaintext};
             return opts;
         },
 
@@ -934,8 +954,9 @@
                 tpost.onreadystatechange = function () {
                     if (tpost.readyState === 4) {
                         if (tpost.status >= 200 && tpost.status <= 300) {
-                            console.log("Posting tweet succeeded", tpost.responseText);
-                            return resolve(tpost.status);
+
+                            //console.log("Posting tweet succeeded", tpost.responseText);
+                            return resolve(tpost.responseText);
                         } else {
                             console.error("Failed to post a tweet:", tpost.status, tpost.responseText);
                             return reject(new Fail(Fail.PUBSUB, "Failed to post tweet. Status=" + tpost.status + " Message: " + tpost.responseText));
@@ -1024,6 +1045,15 @@
         ext_message: function (opts) {
             // just pass the message along.
             return {extcallid: opts.extcallid, msg: opts.msg};
+        },
+
+        new_anon_stream: function (opts) {
+            if (opts.result) {
+                // successful -- keep track of principals in the content script.
+                var keyid = opts.result;
+                localKeys[keyid] = {typ: "anon", principals: [], keyid: keyid};
+            }
+            return opts;
         }
     };
 

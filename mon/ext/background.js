@@ -765,17 +765,18 @@ CryptoCtx.prototype = {
 
       keyid is signed with this user's private signing key
       
-           keyid := <b64user> : <randompart> : <signature>
+           keyid := <prefix> : <b64user> : <randompart> : <signature>
 
         signature over message:
 
-           <b64user> : <randompart> : [<extra>]
+           <prefix> : <b64user> : <randompart> : [<extra>]
     */
-    genKeyid: function (extra) {
+    genKeyid: function (extra, prefix) {
         "use strict";
         var that = this;
-
         extra = extra || "";
+        prefix = prefix || "";
+
         return new Promise(function (resolve, reject) {
             if (that.kr === null) {
                 return reject(new Fail(Fail.NOKEYRING, "Keyring not open."));
@@ -783,10 +784,10 @@ CryptoCtx.prototype = {
             var account = Vault.getAccount(that.kr.username);
             var randomHex = Utils.randomStr128();
             var encodedUser = encodeURIComponent(that.kr.username);
-            var message = encodedUser + ":" + randomHex + ":" + extra;
+            var encodedPrefix = encodeURIComponent(prefix);
+            var message = encodedPrefix + ":" + encodedUser + ":" + randomHex + ":" + extra;
             var signature = account.signText(message);
-            if (!extra) resolve(encodedUser + ":" + "anon" + ":" + randomHex + ":" + signature);
-            resolve(encodedUser + ":" + randomHex + ":" + signature);
+            resolve( encodedPrefix + ":" + encodedUser + ":" + randomHex + ":" + signature);
         });
     },
 
@@ -801,14 +802,15 @@ CryptoCtx.prototype = {
                 return reject(new Fail(Fail.NOKEYRING, "Keyring not open."));
             }
             var toks = keyid.split(/:/);
-            if (toks.length !== 3) {
+            if (toks.length !== 4) {
                 return reject(new Fail(Fail.INVALIDKEY, "wrong format"));
             }
-            var keyUser = decodeURIComponent(toks[0]);
-            var encodedUser = toks[0];
-            var hexBits = toks[1];
-            var signature = toks[2];
-            var message = encodedUser + ":" + hexBits + ":" + extra;
+            var keyUser = decodeURIComponent(toks[1]);
+            var encodedPrefix = toks[0];
+            var encodedUser = toks[1];
+            var hexBits = toks[2];
+            var signature = toks[3];
+            var message = encodedPrefix + ":" + encodedUser + ":" + hexBits + ":" + extra;
 
             API.fetchPublic(keyUser).then(function (pubKey) {
                 try {
@@ -936,10 +938,10 @@ CryptoCtx.prototype = {
 
     newAnonStream: function () {
        "use strict";
-       var keyObj = new AnonKey();
+       //var keyObj = new AnonKey();
        var that = this;
 
-       return that.genKeyid().then(function (keyid) {
+       return that.genKeyid("", "anon").then(function (keyid) {
          return keyid;
        });
     },
@@ -1279,7 +1281,7 @@ CryptoCtx.prototype = {
             });
     },
 
-    postTweets: function (tweets) {
+    postTweets: function (tags, keys) {
         "use strict";
         var that = this;   
 
@@ -1289,18 +1291,25 @@ CryptoCtx.prototype = {
 
 
         var prompt = UI.prompt(that, that.promptId++,
-           "Beeswax will post your tweets to twitter account " + "'@" + that.kr.username + "'\n Do you wish to continue?",
+           "Beeswax will post your messages to twitter account " + "'@" + that.kr.username + "'\n Do you wish to continue?",
            [UI.Prompt.ACCEPT, UI.Prompt.REFUSE]);
         return prompt.getPromise().then(function (triggered) {
             if (triggered !== UI.Prompt.ACCEPT) {
                 throw new Fail(Fail.REFUSED, "Posting Tweets not accepted: " + triggered);
             } else {
                     // Accepted
-                    return API.postTweets(that.kr.username, tweets).catch(function (err) {
-                        UI.log("error posting(" + err.code + "): " + err);
+                    return API.postTweets(that.kr.username, keys).catch(function (err) {
+                        UI.log("error posting messages(" + err.code + "): " + err);
                         throw err; // throw again
-                    }).then(function () {
+                    }).then(function (tweetIDs) {
+                        var baseString = " https://twitter.com/" + encodeURIcomponent(that.kr.username) + "/status/";
                         UI.log("Tweets for @" + that.kr.username + " posted.");
+                        for (var i=0; i<tags.length; i++) tags[i] = tags[i] + baseString + tweetIDs[i];
+                        return API.postTweets(that.kr.username, tags).catch(function (err) {
+                            UI.log("error replying(" + err.code + "): " + err);
+                        }).then(function () {
+                            UI.log("Replies for @" + that.kr.username + " posted.");
+                        });
                     });       
                 }
         });
@@ -1333,13 +1342,12 @@ CryptoCtx.prototype = {
         });
     },
 
-    encryptMessage: function (keyObj, plaintext) {
+    encryptMessage: function (principals, plaintext) {
         "use strict";
         var that = this;
         //TODO: ENCRYPT WITH PUBLIC KEY OF EACH USER IN KEYOBJ
       
         var result = [];
-        var principals = keyObj.principals;
 
         for (var i=0; i<principals.length; i++){
           var ident = Vault.getAccount(principals[i]);
@@ -1833,11 +1841,18 @@ BGAPI.prototype.postTweets = function (username, messages) {
 
         for (ti = 0; ti < tweets.length; ti++) {
             promisesPromises.push(twitterCtx[0].callCS("post_public", {tweet: tweets[ti], authToken: authToken}));
+
         }
 
-        return Promise.all(promisesPromises).then(function () {
+        return Promise.all(promisesPromises).then(values => {
+            console.log("promises ", values);
             // All tweets pushed.
-            return true;
+            var ret = [];
+            for (var i =0; i<values.length; i++) {
+                console.log("promise ", JSON.parse(values[i]).tweet_id);
+                ret.push(JSON.parse(values[i]).tweet_id);
+            }
+            return ret;
         });
     });
 };
@@ -2105,7 +2120,7 @@ BGAPI.prototype.fetchTwitter = function (username) {
         // fetch the corresponding username's tweets
         // get the signing key and the encrypting key
         var preq = new XMLHttpRequest();
-        preq.open("GET", "https://twitter.com/" + username, true);
+        preq.open("GET", "https://twitter.com/" + encodeURIComponent(username), true);
         preq.onerror = function () {
             console.error("Prolem loading tweets", [].slice.apply(arguments));
             reject(new Fail(Fail.GENERIC, "Ajax failed."));
@@ -2678,14 +2693,8 @@ var handlers = {
         var keyid = rpc.params.keyObj.keyid;
  
         if (method) {
-            if (rpc.params.keyObj.principals.length > 0) KeyCache.set(keyid, rpc.params.keyObj);
             var streamKey = KeyLoader.fromStore(rpc.params.keyObj);
-            return UI[method](rpc.params.val, streamKey).then(function () {
-                ctx.port.postMessage({callid: rpc.callid, result: true});
-            }).catch(function (err) {
-                console.error(err);
-                ctx.port.postMessage({callid: rpc.callid, error: Fail.toRPC(err)});
-            });
+            return UI[method](rpc.params.val, streamKey);
         } else {
             console.error("Invalid privacy indicator message type:", rpc.params.type);
             ctx.port.postMessage({callid: rpc.callid, error: Fail.BADPARAM});
@@ -2978,8 +2987,8 @@ var handlers = {
 
     post_tweets: function (ctx, rpc) {
         "use strict";
-        rpc.params = assertType(rpc.params, {tweets: []});
-        ctx.postTweets(rpc.params.tweets).then(function (res) {
+        rpc.params = assertType(rpc.params, {tags: [], keys: []});
+        ctx.postTweets(rpc.params.tags, rpc.params.keys).then(function (res) {
             ctx.port.postMessage({callid: rpc.callid, result: res});
         }).catch(function (err) {
             console.error(err);
@@ -2999,9 +3008,9 @@ var handlers = {
 
     encrypt_elGamal: function (ctx, rpc) {
         "use strict";
-        rpc.params = assertType(rpc.params, {keyhandle: KH_TYPE});
+        rpc.params = assertType(rpc.params, {principals: []});
 
-        var ret = ctx.encryptMessage(KeyCache.get(rpc.params.keyhandle.keyid), rpc.params.plaintext);
+        var ret = ctx.encryptMessage(rpc.params.principals, rpc.params.plaintext);
         ctx.port.postMessage({callid: rpc.callid, result: ret});/*.then(function (res) {
             return res;
         }).catch(function (err) {

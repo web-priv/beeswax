@@ -1195,8 +1195,8 @@ function (G) {
             return monitor.send("post_keys", {params: {username: username}});
         },
 
-        post_tweets: function (tweets) {
-            return monitor.send("post_tweets", {params: {tweets: tweets}});
+        post_tweets: function (tags, keys) {
+            return monitor.send("post_tweets", {params: {tags: tags, keys: keys}});
         },
 
         get_twitter_stream: function () {
