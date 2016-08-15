@@ -269,8 +269,16 @@
     _extends(SelectArea, PArea, {
 
          getContent: function() {
-             //return this.el.value;
-             return getSelected();
+            //return this.el.value;
+            var selected = [];
+            var k;
+            var selectedDict = getSelected();
+            for (k in selectedDict) {
+                if (selectedDict[k]) {
+                    selected.push(k);
+                }
+            }
+            return selected;
          },
 
          render: function() {
@@ -302,9 +310,14 @@
          },
 
          getSelected: function() {
-            var result = [];
-             for (var i=0; i<this.el.options.length; i++) if(this.el.options[i].selected) result.push(this.el.options[i].value || this.el.options[i].text);
-             return result;
+            var selected = {};
+            for (var i=0; i<this.el.options.length; i++) {
+                if(this.el.options[i].selected) {
+                    var selectedVal = this.el.options[i].value || this.el.options[i].text;
+                    selected[selectedVal] = true;
+                }
+            }
+            return selected;
          }
     });
 
@@ -464,8 +477,6 @@
             var cscallinfo = csCallIDs[cscallid];
             var handler = null;
 
-            console.log("WTH", JSON.stringify(resp));
-
             if (cscallid === null) {
                 // call from bg
                 if (resp.bgcallid !== undefined) {
@@ -473,16 +484,14 @@
                     // promise-based mechanism
                     handler = CSAPI[resp.cmd];
                     handler(resp.params).then(function (result) {
-                        console.log("resp", resp);
                         delete resp.error;
                         resp.result = result;
                         csPort.postMessage(resp); // send it back
                     }).catch(function (err) {
-                        console.log("err ", err);
                         delete resp.result;
                         resp.error = Fail.toRPC(err);
                         console.error("ERR:", err);
-                        /*sendMsgOut*/csPort.postMessage(resp);
+                        csPort.postMessage(resp);
                     });
                     return;
 
@@ -864,7 +873,14 @@
             }
 
             params.plaintext = parea.getContent();
-            params.principals = localKeys[keyhandle.keyid].principals;
+            var principals = [];
+            var k;
+            for (k in localKeys[keyhandle.keyid].principals) {
+                if ((localKeys[keyhandle.keyid].principals)[k]) {
+                    principals.push(k);
+                }
+            }
+            params.principals = principals;
 
             opts.cmd = "encrypt_elGamal";
             opts.params = {principals: params.principals, plaintext: params.plaintext};
@@ -974,35 +990,72 @@
         },
 
         get_stream: function (opts) {
-            return new Promise(function (resolve, reject) {
-                console.log("getting stream");
-                var token = opts.authToken;
-                var tpost = new XMLHttpRequest();
-                var user = opts.user;
+            return new Promise(function (resolve, reject) {           
 
-                var url = 'https://userstream.twitter.com/1.1/user.json';
-                tpost.open("GET", url, true);
-                tpost.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+                var consumerKey = "rq5Jbae2HuhvT5LGSbWq6Wdue";
+                var consumerSecret = "Va9oHgMPZX3e9EDgGfwXZ9kFiKBOxJovb6SLBFCWAYoMN7tkK7";
+                var accessToken = "738445087823171584-oFyetz0VlgRR2RY3YmDjvhaKHKQhUC5";
+                var accessSecret = "rhNYnNxw6bVrPH8gqwRrRhEEH4EnBWx22gffcQTaLYh5d";
+                var signingKey = consumerSecret + "&" + accessSecret;
+
+                var SIGNATURE_METHOD = "HMAC-SHA1";
+                var SIGNATURE_METHOD_URL = "%26oauth_signature_method%3DHMAC-SHA1";
+
+                var OAUTH_VERSION = "1.0";
+                var OAUTH_VERSION_URL = "%26oauth_version%3D1.0";
+
+                var STREAM_BASE_STRING = "POST&https%3A%2F%2Fstream.twitter.com%2F1.1%2Fstatuses%2Ffilter.json&" + encodeURIComponent("oauth_consumer_key=" + consumerKey);
+                var NONCE_LENGTH = 32;
+
+                var nonceGenerator = function(length) {
+                    var text = "";
+                    var possible = "abcdef0123456789";
+                    for(var i = 0; i < length; i++) {
+                        text += possible.charAt(Math.floor(Math.random() * possible.length));
+                    }
+                    return text;
+                }
+
+                var oauth_nonce = encodeURIComponent(nonceGenerator(NONCE_LENGTH));
+                var oauth_nonce_url = "%26oauth_nonce%3D" + oauth_nonce;
+
+                var oauth_timestamp = encodeURIComponent(parseInt((new Date().getTime())/1000));
+                var oauth_timestamp_url = "%26oauth_timestamp%3D" + oauth_timestamp;
+
+                var signature_base_string = STREAM_BASE_STRING + oauth_nonce_url + SIGNATURE_METHOD_URL + oauth_timestamp_url + "%26oauth_token%3D" + accessToken +  OAUTH_VERSION_URL + "%26track%3Dtwistor";
+
+                var oauth_signature = Utils.hmac_sha1(signingKey, signature_base_string);
                 
+                var header_string = 'OAuth oauth_consumer_key="' + consumerKey + '", oauth_nonce="' + oauth_nonce + '", oauth_signature="' + encodeURIComponent(oauth_signature) + '", oauth_signature_method="' + SIGNATURE_METHOD + '", oauth_timestamp="' + oauth_timestamp + '", oauth_token="' + accessToken + '", oauth_version="' + OAUTH_VERSION + '"';
+                console.log("header string, ", header_string);
+                console.log("getting stream");
+                var tpost = new XMLHttpRequest();
+
+                var url = 'https://stream.twitter.com/1.1/statuses/filter.json';
+                tpost.open("POST", url, true);
+                tpost.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+                tpost.setRequestHeader("Authorization", header_string);
+                var postData = "track=twistor";
 
                 tpost.onreadystatechange = function () {
-                    if (tpost.readyState === 4) {
+                    if (tpost.readyState > 2)  {
                         if (tpost.status >= 200 && tpost.status <= 300) {
                             console.log("Streaming succeeded");
-                            return resolve(tpost.status);
+                            opts.stream.newTweet(tpost.responseText);
+                            return resolve(tpost);
                         } else {
                             console.error("Failed to stream:", tpost.status, tpost.responseText);
-                            return reject(new Fail(Fail.PUBSUB, "Failed to stream. Message: " + tpost.responseText));
+                            return reject(new Fail(Fail.PUBSUB, "Failed to stream. Message: " + tpost.responseText + "status " + tpost.status +" header string, " + header_string + " base url, " + signature_base_string));
                         }
                     }
                 };
 
                 tpost.onerror = function () {
-                    console.error("Prolem streaming.", [].slice.apply(arguments));
+                    console.error("Problem streaming.", [].slice.apply(arguments));
                     return reject(new Fail(Fail.GENERIC, "Failed to stream."));
                 };
 
-                tpost.send();
+                tpost.send(postData);
             });
         }
     };
@@ -1051,7 +1104,7 @@
             if (opts.result) {
                 // successful -- keep track of principals in the content script.
                 var keyid = opts.result;
-                localKeys[keyid] = {typ: "anon", principals: [], keyid: keyid};
+                localKeys[keyid] = {typ: "anon", principals: {}, keyid: keyid};
             }
             return opts;
         }

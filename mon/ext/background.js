@@ -920,6 +920,7 @@ CryptoCtx.prototype = {
         }
     },
 
+
     // promises a streamid
     newStream: function () {
         "use strict";
@@ -936,6 +937,7 @@ CryptoCtx.prototype = {
         });
     },
 
+    //promises an anon streamid
     newAnonStream: function () {
        "use strict";
        //var keyObj = new AnonKey();
@@ -1298,11 +1300,16 @@ CryptoCtx.prototype = {
                 throw new Fail(Fail.REFUSED, "Posting Tweets not accepted: " + triggered);
             } else {
                     // Accepted
+                    /*return API.postTweets(that.kr.username, keys).catch(function (err) {
+                        UI.log("error posting messages(" + err.code + "): " + err);
+                        throw err; // throw again
+                    }).then(function (tweetIDs) {
+                    });*/
                     return API.postTweets(that.kr.username, keys).catch(function (err) {
                         UI.log("error posting messages(" + err.code + "): " + err);
                         throw err; // throw again
                     }).then(function (tweetIDs) {
-                        var baseString = " https://twitter.com/" + encodeURIcomponent(that.kr.username) + "/status/";
+                        var baseString = " https://twitter.com/" + encodeURIComponent(that.kr.username) + "/status/";
                         UI.log("Tweets for @" + that.kr.username + " posted.");
                         for (var i=0; i<tags.length; i++) tags[i] = tags[i] + baseString + tweetIDs[i];
                         return API.postTweets(that.kr.username, tags).catch(function (err) {
@@ -1315,7 +1322,7 @@ CryptoCtx.prototype = {
         });
     },
 
-    getTwitterStream: function () {
+    getTwitterStream: function (stream) {
         "use strict";
         var that = this;   
 
@@ -1332,7 +1339,7 @@ CryptoCtx.prototype = {
                 throw new Fail(Fail.REFUSED, "Streaming not accepted: " + triggered);
             } else {
                     // Accepted
-                    return API.getTwitterStream(that.kr.username).catch(function (err) {
+                    return API.getTwitterStream(that.kr.username, stream).catch(function (err) {
                         UI.log("error streaming(" + err.code + "): " + err);
                         throw err; // throw again
                     }).then(function () {
@@ -1348,17 +1355,37 @@ CryptoCtx.prototype = {
         //TODO: ENCRYPT WITH PUBLIC KEY OF EACH USER IN KEYOBJ
       
         var result = [];
+        var promisesPromises = [];
 
         for (var i=0; i<principals.length; i++){
-          var ident = Vault.getAccount(principals[i]);
-          if (!ident) {
-            return Promise.reject(new Error("account name does not exist: " + principals[i]));
-          }
-          var pubKey = ident.toPubKey();
-          var ct = pubKey.encryptMessage(plaintext);
-          result.push(ct);
-          return result;
+            /*var ident = Vault.getAccount(principals[i]);
+            if (!ident) {
+                return Promise.reject(new Error("account name does not exist: " + principals[i]));
+            }
+            var pubKey = /*ident.toPubKey();*/
+            promisesPromises.push(API.fetchPublic(principals[i]));
+            /*.then(function (pubKey) {
+                console.log("encrypting plaintext " + plaintext + " with pubKey ", pubKey);
+
+                var ct = pubKey.encryptMessage(plaintext);
+                console.log("ct is ", ct);
+                result.push(ct);
+                if ((i+1) === principals.length) {
+                    return result;
+                }
+            }).catch(function (err) {
+                console.error("encryptMessage error:", err);
+                throw err;
+            });  */
         }
+        return Promise.all(promisesPromises).then(pubKeys => {
+            for (var i=0; i<pubKeys.length; i++) {
+                result.push(pubKeys[i].encryptMessage(plaintext));
+            }
+            console.log("pubKeys are ", pubKeys);
+            console.log("ct's are ", result);
+            return result;
+        });
     },
 
     decryptMessage: function (ct) {
@@ -1848,16 +1875,19 @@ BGAPI.prototype.postTweets = function (username, messages) {
             console.log("promises ", values);
             // All tweets pushed.
             var ret = [];
+            var j = 0;
             for (var i =0; i<values.length; i++) {
+                if (values[i]) j++;
                 console.log("promise ", JSON.parse(values[i]).tweet_id);
                 ret.push(JSON.parse(values[i]).tweet_id);
             }
+            console.log("there were " + j + " tweets");
             return ret;
         });
     });
 };
 
-BGAPI.prototype.getTwitterStream = function (username) {
+BGAPI.prototype.getTwitterStream = function (username, stream) {
     "use strict";
 
     console.debug("[BGAPI] getTwitterStream:", username);
@@ -1927,15 +1957,15 @@ BGAPI.prototype.getTwitterStream = function (username) {
             }
 
             resolve(
-                {token: token
+                {stream: stream
                 });
         };
         //send the profile request
         preq.send();
     }).then(function (twitterInfo) {
-        var token = twitterInfo.token;
+        var stream = twitterInfo.stream;
 
-        return {token: token};
+        return {stream: stream};
 
     }).then(function (tweetInfo) {
         
@@ -1944,7 +1974,7 @@ BGAPI.prototype.getTwitterStream = function (username) {
         }
 
         var twitterCtx = CryptoCtx.filter(isTwitterCtx);
-        var authToken = tweetInfo.token;
+        var stream = tweetInfo.stream;
         var ti;
         var promisesPromises = [];
 
@@ -1953,11 +1983,11 @@ BGAPI.prototype.getTwitterStream = function (username) {
         }
 
         console.log("calling CS");
-        promisesPromises.push(twitterCtx[0].callCS("get_stream", {authToken: authToken}));
+        promisesPromises.push(twitterCtx[0].callCS("get_stream", {stream: stream}));
 
-        return Promise.all(promisesPromises).then(function () {
+        return Promise.all(promisesPromises).then(values => {
             // All tweets pushed.
-            return true;
+            return values[0];
         });
     });
 };
@@ -2998,8 +3028,9 @@ var handlers = {
 
     get_twitter_stream: function (ctx, rpc) {
         "use strict";
-        ctx.getTwitterStream().then(function (res) {
-            ctx.port.getTwitterStream({callid: rpc.callid, result: res});
+        rpc.params = assertType(rpc.params, {stream: {}});
+        ctx.getTwitterStream(rpc.params.stream).then(function (res) {
+            ctx.port.postMessage({callid: rpc.callid, result: res});
         }).catch(function (err) {
             console.error(err);
             ctx.port.postMessage({callid: rpc.callid, error: Fail.toRPC(err)});
@@ -3010,8 +3041,10 @@ var handlers = {
         "use strict";
         rpc.params = assertType(rpc.params, {principals: []});
 
-        var ret = ctx.encryptMessage(rpc.params.principals, rpc.params.plaintext);
-        ctx.port.postMessage({callid: rpc.callid, result: ret});/*.then(function (res) {
+        ctx.encryptMessage(rpc.params.principals, rpc.params.plaintext).then(function (ret) {
+            ctx.port.postMessage({callid: rpc.callid, result: ret});
+        });
+        /*.then(function (res) {
             return res;
         }).catch(function (err) {
             console.error(err);

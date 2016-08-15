@@ -1199,8 +1199,8 @@ function (G) {
             return monitor.send("post_tweets", {params: {tags: tags, keys: keys}});
         },
 
-        get_twitter_stream: function () {
-            return monitor.send("get_twitter_stream", {});
+        get_twitter_stream: function (stream) {
+            return monitor.send("get_twitter_stream", {params: {stream: stream}});
         },
 
         /**
