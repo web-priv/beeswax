@@ -992,36 +992,6 @@
         get_stream: function (opts) {
             return new Promise(function (resolve, reject) { 
 
-                var StreamParser = function StreamParser() {
-                    this.buffer = '';              
-                    return this;
-                };
-
-                StreamParser.END        = '\r\n';
-                StreamParser.END_LENGTH = 2;
-
-                StreamParser.prototype.receive = function receive(buffer) {
-                    this.buffer += buffer.toString('utf8');
-                    var index, json;
-
-                    // We have END?
-                    while ((index = this.buffer.indexOf(StreamParser.END)) > -1) {
-                        json = this.buffer.slice(0, index);
-                        this.buffer = this.buffer.slice(index + StreamParser.END_LENGTH);
-                        if (json.length > 0) {
-                            try {
-                                json = JSON.parse(json);
-                                console.log(json);
-                                return json.text;
-                            } catch(error) {
-                                console.error('ERR', error);
-                            }
-                        }
-                    }
-                };
-
-                var streamParser = new StreamParser();       
-
                 var nonceGenerator = function(length) {
                     var text = "";
                     var possible = "abcdef0123456789";
@@ -1030,6 +1000,9 @@
                     }
                     return text;
                 };
+
+                var url = 'https://stream.twitter.com/1.1/statuses/filter.json';
+                var streamer;
                
                 var tpost_creator = function() {
 
@@ -1063,61 +1036,71 @@
                     console.log("header string, ", header_string);
                     console.log("getting stream");
 
+                    tpost.open("POST", url, true);
                     tpost.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
                     tpost.setRequestHeader("Authorization", header_string);
+                    tpost.postData = "track=twistor";
+                    tpost.index = 0;
+                    tpost.stream_buffer = '';
+                    tpost.tweets = [];
+
+                    tpost.onreadystatechange = function () {
+                        if (tpost.readyState > 2)  {
+                            if (tpost.status >= 200 && tpost.status <= 300) {
+                                //start at the index we left off
+                                tpost.stream_buffer = tpost.responseText.substr(tpost.index);
+                                //remove possible leading whitespace from tpost.responseText
+                                tpost.stream_buffer = tpost.stream_buffer.replace(/^\s+/g, "");                  
+
+                                //check if we received multiple tweets in one process chunk
+                                while (tpost.stream_buffer.length != 0 && tpost.stream_buffer[0] !== '\n' && tpost.stream_buffer[0] !== '\r') {
+                                    var curr_index = tpost.stream_buffer.indexOf('\n');
+                                    tpost.index += tpost.stream_buffer.indexOf('\n')+1;
+                                    //list.push(tpost.stream_buffer.substr(0,curr_index)); 
+                                    var json = tpost.stream_buffer.substr(0,curr_index);
+
+                                    if (json.length > 0) {
+                                       try {
+                                        json = JSON.parse(json);
+                                        tpost.tweets.push(json.text);
+                                        //opts.stream.setTweet(json.text);
+                                        console.log(json.text);
+                                       } catch (error) {
+                                        console.error("ERR: ", error);
+                                       }
+                                    }   
+                                    //opts.stream.newTweet(streamParser.receive((tpost.stream_buffer.substr(0,tweet_end)));
+                                    tpost.stream_buffer = tpost.stream_buffer.substr(curr_index+1);
+                                }
+
+                                //If the current tpost buffer is too big, make a new one;
+                                if (tpost.tweets.length >= 1000) {
+                                    var tmp_tpost = tpost_creator();
+                                    tmp_tpost.onreadystatechange = tpost.onreadystatechange;
+                                    tmp_tpost.onerror = tpost.onerror;
+                                    tmp_tpost.send(tmp_tpost.postData);
+                                    streamer.open("DELETE", url, true);
+                                    streamer = tmp_tpost;
+                                }
+
+                            } else {
+                                console.error("Failed to stream:", tpost.status, tpost.responseText);
+                                return reject(new Fail(Fail.PUBSUB, "Failed to stream. Message: " + tpost.responseText + "status " + tpost.status +" header string, " + header_string + " base url, " + signature_base_string));
+                            }
+                        }
+                    };
+
+                    tpost.onerror = function () {
+                        console.error("Problem streaming.", [].slice.apply(arguments));
+                        return reject(new Fail(Fail.GENERIC, "Failed to stream."));
+                    };
 
                     return tpost;
                 };
 
-                var tpost = tpost_creator();
-
-                var url = 'https://stream.twitter.com/1.1/statuses/filter.json';
-                tpost.open("POST", url, true);
-
-                var postData = "track=twistor";
-                var index = 0;
-                var stream_buffer = '';
-                var tweets = [];
+                streamer = tpost_creator();         
                 
-                tpost.onreadystatechange = function () {
-                    if (tpost.readyState > 2)  {
-                        if (tpost.status >= 200 && tpost.status <= 300) {
-                            console.log("Streaming succeeded");
-
-                            stream_buffer = tpost.responseText.substr(index);
-
-                            while (stream_buffer[0] === "\n" || stream_buffer[0] === "\r") {
-                                stream_buffer = stream_buffer.substr(1);
-                            }                    
-                            
-                            //check if we received multiple tweets in one process chunk
-                            while (stream_buffer[0] !== '\n' && stream_buffer[0] !== '\r' && stream_buffer.length != 0) {
-                                var curr_index = stream_buffer.indexOf('\n');
-                                index += stream_buffer.indexOf('\n')+1;
-                                //list.push(stream_buffer.substr(0,curr_index)); 
-                                tweets.push(streamParser.receive(stream_buffer.substr(0,curr_index)));
-                                //opts.stream.newTweet(streamParser.receive((stream_buffer.substr(0,tweet_end)));
-                                stream_buffer = stream_buffer.substr(curr_index+1);
-                            }
-
-                            //opts.stream.newTweet(tpost.responseText);
-                            if (tweets.length === 10) return resolve(tweets);
-
-                            //TODO: MAKE AN OBJECT FOR THE NEW TPOST WHEN THERE'S TOO MANY TWEETS IN THE STREAM
-                            //return resolve(new_tweet_text);
-                        } else {
-                            console.error("Failed to stream:", tpost.status, tpost.responseText);
-                            return reject(new Fail(Fail.PUBSUB, "Failed to stream. Message: " + tpost.responseText + "status " + tpost.status +" header string, " + header_string + " base url, " + signature_base_string));
-                        }
-                    }
-                };
-
-                tpost.onerror = function () {
-                    console.error("Problem streaming.", [].slice.apply(arguments));
-                    return reject(new Fail(Fail.GENERIC, "Failed to stream."));
-                };
-
-                tpost.send(postData);
+                streamer.send(streamer.postData);
             });
         }
     };
