@@ -1020,21 +1020,7 @@
                     }
                 };
 
-                var streamParser = new StreamParser();          
-                var consumerKey = "rq5Jbae2HuhvT5LGSbWq6Wdue";
-                var consumerSecret = "Va9oHgMPZX3e9EDgGfwXZ9kFiKBOxJovb6SLBFCWAYoMN7tkK7";
-                var accessToken = "738445087823171584-oFyetz0VlgRR2RY3YmDjvhaKHKQhUC5";
-                var accessSecret = "rhNYnNxw6bVrPH8gqwRrRhEEH4EnBWx22gffcQTaLYh5d";
-                var signingKey = consumerSecret + "&" + accessSecret;
-
-                var SIGNATURE_METHOD = "HMAC-SHA1";
-                var SIGNATURE_METHOD_URL = "%26oauth_signature_method%3DHMAC-SHA1";
-
-                var OAUTH_VERSION = "1.0";
-                var OAUTH_VERSION_URL = "%26oauth_version%3D1.0";
-
-                var STREAM_BASE_STRING = "POST&https%3A%2F%2Fstream.twitter.com%2F1.1%2Fstatuses%2Ffilter.json&" + encodeURIComponent("oauth_consumer_key=" + consumerKey);
-                var NONCE_LENGTH = 32;
+                var streamParser = new StreamParser();       
 
                 var nonceGenerator = function(length) {
                     var text = "";
@@ -1043,30 +1029,55 @@
                         text += possible.charAt(Math.floor(Math.random() * possible.length));
                     }
                     return text;
-                }
+                };
+               
+                var tpost_creator = function() {
 
-                var oauth_nonce = encodeURIComponent(nonceGenerator(NONCE_LENGTH));
-                var oauth_nonce_url = "%26oauth_nonce%3D" + oauth_nonce;
+                    var tpost = new XMLHttpRequest();    
+                    var consumerKey = "rq5Jbae2HuhvT5LGSbWq6Wdue";
+                    var consumerSecret = "Va9oHgMPZX3e9EDgGfwXZ9kFiKBOxJovb6SLBFCWAYoMN7tkK7";
+                    var accessToken = "738445087823171584-oFyetz0VlgRR2RY3YmDjvhaKHKQhUC5";
+                    var accessSecret = "rhNYnNxw6bVrPH8gqwRrRhEEH4EnBWx22gffcQTaLYh5d";
+                    var signingKey = consumerSecret + "&" + accessSecret;
 
-                var oauth_timestamp = encodeURIComponent(parseInt((new Date().getTime())/1000));
-                var oauth_timestamp_url = "%26oauth_timestamp%3D" + oauth_timestamp;
+                    var SIGNATURE_METHOD = "HMAC-SHA1";
+                    var SIGNATURE_METHOD_URL = "%26oauth_signature_method%3DHMAC-SHA1";
 
-                var signature_base_string = STREAM_BASE_STRING + oauth_nonce_url + SIGNATURE_METHOD_URL + oauth_timestamp_url + "%26oauth_token%3D" + accessToken +  OAUTH_VERSION_URL + "%26track%3Dtwistor";
+                    var OAUTH_VERSION = "1.0";
+                    var OAUTH_VERSION_URL = "%26oauth_version%3D1.0";
 
-                var oauth_signature = Utils.hmac_sha1(signingKey, signature_base_string);
-                
-                var header_string = 'OAuth oauth_consumer_key="' + consumerKey + '", oauth_nonce="' + oauth_nonce + '", oauth_signature="' + encodeURIComponent(oauth_signature) + '", oauth_signature_method="' + SIGNATURE_METHOD + '", oauth_timestamp="' + oauth_timestamp + '", oauth_token="' + accessToken + '", oauth_version="' + OAUTH_VERSION + '"';
-                console.log("header string, ", header_string);
-                console.log("getting stream");
-                var tpost = new XMLHttpRequest();
+                    var STREAM_BASE_STRING = "POST&https%3A%2F%2Fstream.twitter.com%2F1.1%2Fstatuses%2Ffilter.json&" + encodeURIComponent("oauth_consumer_key=" + consumerKey);
+                    var NONCE_LENGTH = 32;     
+
+                    var oauth_nonce = encodeURIComponent(nonceGenerator(NONCE_LENGTH));
+                    var oauth_nonce_url = "%26oauth_nonce%3D" + oauth_nonce;
+
+                    var oauth_timestamp = encodeURIComponent(parseInt((new Date().getTime())/1000));
+                    var oauth_timestamp_url = "%26oauth_timestamp%3D" + oauth_timestamp;
+
+                    var signature_base_string = STREAM_BASE_STRING + oauth_nonce_url + SIGNATURE_METHOD_URL + oauth_timestamp_url + "%26oauth_token%3D" + accessToken +  OAUTH_VERSION_URL + "%26track%3Dtwistor";
+
+                    var oauth_signature = Utils.hmac_sha1(signingKey, signature_base_string);
+
+                    var header_string = 'OAuth oauth_consumer_key="' + consumerKey + '", oauth_nonce="' + oauth_nonce + '", oauth_signature="' + encodeURIComponent(oauth_signature) + '", oauth_signature_method="' + SIGNATURE_METHOD + '", oauth_timestamp="' + oauth_timestamp + '", oauth_token="' + accessToken + '", oauth_version="' + OAUTH_VERSION + '"';
+                    console.log("header string, ", header_string);
+                    console.log("getting stream");
+
+                    tpost.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+                    tpost.setRequestHeader("Authorization", header_string);
+
+                    return tpost;
+                };
+
+                var tpost = tpost_creator();
 
                 var url = 'https://stream.twitter.com/1.1/statuses/filter.json';
                 tpost.open("POST", url, true);
-                tpost.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
-                tpost.setRequestHeader("Authorization", header_string);
+
                 var postData = "track=twistor";
                 var index = 0;
                 var stream_buffer = '';
+                var tweets = [];
                 
                 tpost.onreadystatechange = function () {
                     if (tpost.readyState > 2)  {
@@ -1077,20 +1088,22 @@
 
                             while (stream_buffer[0] === "\n" || stream_buffer[0] === "\r") {
                                 stream_buffer = stream_buffer.substr(1);
-                            }
-                            var chunk = '';                       
-                            var tweets = [];
-
+                            }                    
+                            
                             //check if we received multiple tweets in one process chunk
-                            while ((stream_buffer[0] !== '\n' || stream_buffer[0] !== '\r') && stream_buffer.length != 0) {
-                                index += stream_buffer.indexOf('\n');
-                                tweets.push(streamParser.receive((stream_buffer.substr(0,index)));
+                            while (stream_buffer[0] !== '\n' && stream_buffer[0] !== '\r' && stream_buffer.length != 0) {
+                                var curr_index = stream_buffer.indexOf('\n');
+                                index += stream_buffer.indexOf('\n')+1;
+                                //list.push(stream_buffer.substr(0,curr_index)); 
+                                tweets.push(streamParser.receive(stream_buffer.substr(0,curr_index)));
                                 //opts.stream.newTweet(streamParser.receive((stream_buffer.substr(0,tweet_end)));
-                                stream_buffer = stream_buffer.substr(index+1);
+                                stream_buffer = stream_buffer.substr(curr_index+1);
                             }
 
-                            opts.stream.newTweet(tpost.responseText);
+                            //opts.stream.newTweet(tpost.responseText);
                             if (tweets.length === 10) return resolve(tweets);
+
+                            //TODO: MAKE AN OBJECT FOR THE NEW TPOST WHEN THERE'S TOO MANY TWEETS IN THE STREAM
                             //return resolve(new_tweet_text);
                         } else {
                             console.error("Failed to stream:", tpost.status, tpost.responseText);
