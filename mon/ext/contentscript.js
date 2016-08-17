@@ -990,8 +990,37 @@
         },
 
         get_stream: function (opts) {
-            return new Promise(function (resolve, reject) {           
+            return new Promise(function (resolve, reject) { 
 
+                var StreamParser = function StreamParser() {
+                    this.buffer = '';              
+                    return this;
+                };
+
+                StreamParser.END        = '\r\n';
+                StreamParser.END_LENGTH = 2;
+
+                StreamParser.prototype.receive = function receive(buffer) {
+                    this.buffer += buffer.toString('utf8');
+                    var index, json;
+
+                    // We have END?
+                    while ((index = this.buffer.indexOf(StreamParser.END)) > -1) {
+                        json = this.buffer.slice(0, index);
+                        this.buffer = this.buffer.slice(index + StreamParser.END_LENGTH);
+                        if (json.length > 0) {
+                            try {
+                                json = JSON.parse(json);
+                                console.log(json);
+                                return json.text;
+                            } catch(error) {
+                                console.error('ERR', error);
+                            }
+                        }
+                    }
+                };
+
+                var streamParser = new StreamParser();          
                 var consumerKey = "rq5Jbae2HuhvT5LGSbWq6Wdue";
                 var consumerSecret = "Va9oHgMPZX3e9EDgGfwXZ9kFiKBOxJovb6SLBFCWAYoMN7tkK7";
                 var accessToken = "738445087823171584-oFyetz0VlgRR2RY3YmDjvhaKHKQhUC5";
@@ -1036,13 +1065,33 @@
                 tpost.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
                 tpost.setRequestHeader("Authorization", header_string);
                 var postData = "track=twistor";
-
+                var index = 0;
+                var stream_buffer = '';
+                
                 tpost.onreadystatechange = function () {
                     if (tpost.readyState > 2)  {
                         if (tpost.status >= 200 && tpost.status <= 300) {
                             console.log("Streaming succeeded");
+
+                            stream_buffer = tpost.responseText.substr(index);
+
+                            while (stream_buffer[0] === "\n" || stream_buffer[0] === "\r") {
+                                stream_buffer = stream_buffer.substr(1);
+                            }
+                            var chunk = '';                       
+                            var tweets = [];
+
+                            //check if we received multiple tweets in one process chunk
+                            while ((stream_buffer[0] !== '\n' || stream_buffer[0] !== '\r') && stream_buffer.length != 0) {
+                                index += stream_buffer.indexOf('\n');
+                                tweets.push(streamParser.receive((stream_buffer.substr(0,index)));
+                                //opts.stream.newTweet(streamParser.receive((stream_buffer.substr(0,tweet_end)));
+                                stream_buffer = stream_buffer.substr(index+1);
+                            }
+
                             opts.stream.newTweet(tpost.responseText);
-                            return resolve(tpost);
+                            if (tweets.length === 10) return resolve(tweets);
+                            //return resolve(new_tweet_text);
                         } else {
                             console.error("Failed to stream:", tpost.status, tpost.responseText);
                             return reject(new Fail(Fail.PUBSUB, "Failed to stream. Message: " + tpost.responseText + "status " + tpost.status +" header string, " + header_string + " base url, " + signature_base_string));

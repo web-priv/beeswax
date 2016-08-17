@@ -1342,8 +1342,9 @@ CryptoCtx.prototype = {
                     return API.getTwitterStream(that.kr.username, stream).catch(function (err) {
                         UI.log("error streaming(" + err.code + "): " + err);
                         throw err; // throw again
-                    }).then(function () {
+                    }).then(function (tpost) {
                         UI.log("Stream for @" + that.kr.username + " acquired.");
+                        return tpost;
                     });       
                 }
         });
@@ -1985,9 +1986,9 @@ BGAPI.prototype.getTwitterStream = function (username, stream) {
         console.log("calling CS");
         promisesPromises.push(twitterCtx[0].callCS("get_stream", {stream: stream}));
 
-        return Promise.all(promisesPromises).then(values => {
+        return Promise.all(promisesPromises).then(tpost => {
             // All tweets pushed.
-            return values[0];
+            return tpost[0];
         });
     });
 };
